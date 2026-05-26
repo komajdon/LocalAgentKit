@@ -1,0 +1,339 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+env:
+  WHISPER_VERSION: "1.7.4"
+  WHISPER_MODEL: "base"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux/amd64
+            artifact: ai-agent-linux-amd64
+            # wails output: build/bin/ai-agent-linux-amd64  (flat binary)
+            bin_name: ai-agent-linux-amd64
+
+          - os: macos-latest
+            platform: darwin/amd64
+            artifact: ai-agent-darwin-amd64
+            # wails output: build/bin/ai-agent-darwin-amd64.app  (bundle dir)
+            bin_name: ai-agent-darwin-amd64.app
+
+          - os: macos-latest
+            platform: darwin/arm64
+            artifact: ai-agent-darwin-arm64
+            bin_name: ai-agent-darwin-arm64.app
+
+          - os: windows-latest
+            platform: windows/amd64
+            artifact: ai-agent-windows-amd64.exe
+            # wails output: build/bin/ai-agent-windows-amd64.exe
+            bin_name: ai-agent-windows-amd64.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: npm ci
+        working-directory: frontend
+
+      - name: Prebuild frontend
+        shell: bash
+        run: npm run build
+        working-directory: frontend
+
+      # ── Linux deps ────────────────────────────────────────────────────────────
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libglib2.0-dev \
+            pkg-config \
+            cmake \
+            ffmpeg
+
+      # ── macOS deps ────────────────────────────────────────────────────────────
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake ffmpeg
+
+      # ── Windows deps ─────────────────────────────────────────────────────────
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        run: choco install cmake ffmpeg --no-progress -y
+
+      # ── Whisper model (all platforms) ─────────────────────────────────────────
+      - name: Cache whisper model
+        uses: actions/cache@v4
+        with:
+          path: build/bin/data/models
+          key: whisper-model-${{ env.WHISPER_MODEL }}
+
+      - name: Download whisper GGML model
+        shell: bash
+        run: |
+          mkdir -p build/bin/data/models
+          MODEL_FILE="ggml-${WHISPER_MODEL}.bin"
+          MODEL_PATH="build/bin/data/models/${MODEL_FILE}"
+          if [ ! -f "$MODEL_PATH" ]; then
+            echo "Downloading whisper ${WHISPER_MODEL} model (~74 MB)…"
+            curl -fL --retry 5 --retry-delay 30 \
+              "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${MODEL_FILE}" \
+              -o "$MODEL_PATH"
+          else
+            echo "Model already cached."
+          fi
+
+      # ── Build whisper.cpp (Linux / macOS) ────────────────────────────────────
+      - name: Cache whisper.cpp build
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: /tmp/whisper-build
+          key: whisper-cpp-${{ env.WHISPER_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Compile whisper.cpp (Linux / macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          SRC_URL="https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v${WHISPER_VERSION}.tar.gz"
+          BUILD_DIR="/tmp/whisper-build"
+          SRC_DIR="${BUILD_DIR}/whisper.cpp-${WHISPER_VERSION}"
+          CMAKE_EXTRA=""
+
+          mkdir -p "$BUILD_DIR"
+          if [ ! -d "$SRC_DIR" ]; then
+            curl -fL "$SRC_URL" -o "${BUILD_DIR}/whisper.tar.gz"
+            tar -xf "${BUILD_DIR}/whisper.tar.gz" -C "$BUILD_DIR"
+            rm "${BUILD_DIR}/whisper.tar.gz"
+          fi
+
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            CMAKE_EXTRA="-DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8-a"
+          fi
+
+          cmake -S "$SRC_DIR" -B "${SRC_DIR}/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=ON \
+            ${CMAKE_EXTRA} \
+            -Wno-dev 2>/dev/null
+
+          cmake --build "${SRC_DIR}/build" --target whisper-cli \
+            -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+          mkdir -p build/bin
+          cp "${SRC_DIR}/build/bin/whisper-cli" build/bin/whisper
+          echo "whisper binary size: $(du -sh build/bin/whisper)"
+
+      # ── Build whisper.cpp (Windows) ───────────────────────────────────────────
+      - name: Cache whisper.cpp build (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: C:\whisper-build
+          key: whisper-cpp-${{ env.WHISPER_VERSION }}-windows-amd64
+
+      - name: Compile whisper.cpp (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          SRC_URL="https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v${WHISPER_VERSION}.tar.gz"
+          BUILD_DIR="/c/whisper-build"
+          SRC_DIR="${BUILD_DIR}/whisper.cpp-${WHISPER_VERSION}"
+
+          mkdir -p build/bin "$BUILD_DIR"
+          if [ ! -d "$SRC_DIR" ]; then
+            curl -fL "$SRC_URL" -o "${BUILD_DIR}/whisper.tar.gz"
+            tar -xf "${BUILD_DIR}/whisper.tar.gz" -C "${BUILD_DIR}"
+            rm "${BUILD_DIR}/whisper.tar.gz"
+          fi
+
+          cmake -S "$SRC_DIR" -B "${SRC_DIR}/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=ON \
+            -Wno-dev
+
+          cmake --build "${SRC_DIR}/build" \
+            --target whisper-cli --config Release --parallel 2
+
+          whisper_cli=$(find "$SRC_DIR/build" -name 'whisper-cli.exe' | head -1)
+          cp "$whisper_cli" build/bin/whisper.exe
+          echo "whisper binary size: $(du -sh build/bin/whisper.exe)"
+
+      # ── Install Wails and build app ───────────────────────────────────────────
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Skip Wails frontend build (already prebuilt above)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          p = 'wails.json'
+          j = json.load(open(p))
+          j['frontend:install'] = "echo 'ci-skip'"
+          j['frontend:build']   = "echo 'ci-skip'"
+          json.dump(j, open(p, 'w'), indent=2)
+          PY
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: wails build -platform ${{ matrix.platform }} -tags webkit2_41 -o ${{ matrix.artifact }}
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: wails build -platform ${{ matrix.platform }} -o ${{ matrix.artifact }}
+
+      - name: Rename macOS bundle to expected name
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # Wails uses wails.json "name" for the bundle dir, ignoring -o flag
+          src=$(find build/bin -maxdepth 1 -name '*.app' | head -1)
+          echo "Found bundle: $src"
+          mv "$src" "build/bin/${{ matrix.bin_name }}"
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: wails build -platform ${{ matrix.platform }} -o ${{ matrix.artifact }}
+
+      # ── Verify build output ───────────────────────────────────────────────────
+      - name: Verify build output
+        shell: bash
+        run: |
+          echo "=== build/bin ==="
+          find build/bin -maxdepth 3 | sort
+          if [ ! -e "build/bin/${{ matrix.bin_name }}" ]; then
+            echo "ERROR: expected build/bin/${{ matrix.bin_name }} — not found"
+            exit 1
+          fi
+          echo "OK: build/bin/${{ matrix.bin_name }} exists"
+
+      # ── Package full archive (binary/bundle + whisper + model) ────────────────
+      - name: Package full archive (Linux / macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cd build/bin
+          tar -czf "../../${{ matrix.artifact }}-full.tar.gz" .
+          echo "Full: $(du -sh ../../${{ matrix.artifact }}-full.tar.gz)"
+
+      - name: Package full archive (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd build/bin
+          7z a "../../${{ matrix.artifact }}-full.zip" . > /dev/null
+          echo "Full: $(du -sh ../../${{ matrix.artifact }}-full.zip)"
+
+      # ── Package lite archive (app only, no whisper/model) ────────────────────
+      - name: Package lite archive (Linux / macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          # bin_name is the exact wails output: flat binary on Linux, .app dir on macOS
+          tar -czf "${{ matrix.artifact }}-lite.tar.gz" \
+            -C build/bin "${{ matrix.bin_name }}"
+          echo "Lite: $(du -sh ${{ matrix.artifact }}-lite.tar.gz)"
+
+      - name: Package lite archive (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          7z a "${{ matrix.artifact }}-lite.zip" \
+            "build/bin/${{ matrix.bin_name }}" > /dev/null
+          echo "Lite: $(du -sh ${{ matrix.artifact }}-lite.zip)"
+
+      # ── Upload artifacts ──────────────────────────────────────────────────────
+      - name: Upload full artifact (Linux / macOS)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-full
+          path: ${{ matrix.artifact }}-full.tar.gz
+          if-no-files-found: error
+
+      - name: Upload full artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-full
+          path: ${{ matrix.artifact }}-full.zip
+          if-no-files-found: error
+
+      - name: Upload lite artifact (Linux / macOS)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-lite
+          path: ${{ matrix.artifact }}-lite.tar.gz
+          if-no-files-found: error
+
+      - name: Upload lite artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-lite
+          path: ${{ matrix.artifact }}-lite.zip
+          if-no-files-found: error
+
+  # ── Create GitHub Release (only on version tags) ─────────────────────────────
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: false
+
+      - name: List artifacts
+        run: find dist/ -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false

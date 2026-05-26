@@ -1,0 +1,29 @@
+# Compiled binaries and runtime user data — never commit
+build/bin/
+
+# Frontend build artifacts
+dist/
+frontend/dist/
+frontend/node_modules/
+frontend/package.json.md5
+
+# Go
+vendor/
+
+# Database & encryption key — live user data / secrets
+data/
+**/data/
+
+# Whisper models — large binaries downloaded at runtime
+**/models/
+
+# Reports — internal docs, not for distribution
+reports/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
