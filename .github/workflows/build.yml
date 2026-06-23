@@ -51,7 +51,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.24'
           cache: true
 
       - name: Set up Node
@@ -323,11 +323,17 @@ jobs:
     name: Build Flatpak
     needs: build
     runs-on: ubuntu-22.04
+    # continue-on-error so a Flatpak infra issue never blocks the platform release
+    continue-on-error: true
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # flatpak-github-actions@v6 calls xvfb-run internally; install it explicitly.
+      - name: Install xvfb
+        run: sudo apt-get update -qq && sudo apt-get install -y xvfb
 
       # Download the already-built Linux amd64 artifact so we don't rebuild.
       - name: Download Linux amd64 full artifact
@@ -368,7 +374,8 @@ jobs:
     name: Create Release
     needs: [build, flatpak]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # always() + build success check: release runs even if flatpak fails/skips
+    if: startsWith(github.ref, 'refs/tags/v') && always() && needs.build.result == 'success'
     permissions:
       contents: write
 
