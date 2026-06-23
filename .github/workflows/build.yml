@@ -331,9 +331,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # flatpak-github-actions@v6 calls xvfb-run internally; install it explicitly.
-      - name: Install xvfb
-        run: sudo apt-get update -qq && sudo apt-get install -y xvfb
+      # flatpak-github-actions@v6 calls xvfb-run and expects flatpak-builder on PATH.
+      # Pre-install the GNOME SDK with sudo to bypass polkit which is unavailable in CI.
+      - name: Install Flatpak build tools and SDK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub \
+            org.gnome.Platform/x86_64/47 \
+            org.gnome.Sdk/x86_64/47
 
       # Download the already-built Linux amd64 artifact so we don't rebuild.
       - name: Download Linux amd64 full artifact
@@ -345,15 +352,17 @@ jobs:
       - name: Extract Linux artifact
         run: tar -xzf linux-artifact/ai-agent-linux-amd64-full.tar.gz -C linux-artifact/
 
-      # Stage all files that the Flatpak manifest sources section expects.
+      # Stage all files next to the manifest so flatpak-builder can resolve
+      # the "type: dir, path: flatpak-src" source relative to build/linux/.
       - name: Stage Flatpak source directory
         run: |
-          mkdir -p flatpak-src
-          cp linux-artifact/ai-agent-linux-amd64   flatpak-src/ai-agent
-          cp linux-artifact/whisper                 flatpak-src/whisper
-          cp build/appicon.png                      flatpak-src/com.bluewhale.AIAgent.png
-          cp build/linux/com.bluewhale.AIAgent.desktop flatpak-src/
-          chmod +x flatpak-src/ai-agent flatpak-src/whisper
+          mkdir -p build/linux/flatpak-src
+          cp linux-artifact/ai-agent-linux-amd64      build/linux/flatpak-src/ai-agent
+          cp linux-artifact/whisper                    build/linux/flatpak-src/whisper
+          # Flatpak rejects icons >512x512 in hicolor/256x256; resize from the 1024x1024 source.
+          convert build/appicon.png -resize 256x256 build/linux/flatpak-src/com.bluewhale.AIAgent.png
+          cp build/linux/com.bluewhale.AIAgent.desktop build/linux/flatpak-src/
+          chmod +x build/linux/flatpak-src/ai-agent build/linux/flatpak-src/whisper
 
       - name: Build Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6

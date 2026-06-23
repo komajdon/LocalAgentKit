@@ -1,7 +1,7 @@
 app-id: com.bluewhale.AIAgent
 runtime: org.gnome.Platform
-runtime-version: '46'
-sdk: org.gnome.Sdk//46
+runtime-version: '47'
+sdk: org.gnome.Sdk//47
 command: ai-agent
 
 finish-args:
