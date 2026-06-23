@@ -20,6 +20,9 @@ data/
 # Reports — internal docs, not for distribution
 reports/
 
+# Knowledge graph output — generated at query time
+graphify-out/
+
 # OS / editor
 .DS_Store
 Thumbs.db

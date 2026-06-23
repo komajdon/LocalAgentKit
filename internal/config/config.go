@@ -10,8 +10,23 @@ const (
 type ProviderType string
 
 const (
-	ProviderOllama ProviderType = "ollama"
-	ProviderOpenAI ProviderType = "openai"
+	ProviderOllama      ProviderType = "ollama"
+	ProviderOpenAI      ProviderType = "openai"
+	ProviderGroq        ProviderType = "groq"
+	ProviderGemini      ProviderType = "gemini"
+	ProviderMistral     ProviderType = "mistral"
+	ProviderCohere      ProviderType = "cohere"
+	ProviderCerebras    ProviderType = "cerebras"
+	ProviderTogether    ProviderType = "together"
+	ProviderOpenRouter  ProviderType = "openrouter"
+	ProviderHuggingFace ProviderType = "huggingface"
+	ProviderSambaNova   ProviderType = "sambanova"
+	ProviderNvidia      ProviderType = "nvidia"
+	// No API key required
+	ProviderLLM7   ProviderType = "llm7"
+	ProviderZAI    ProviderType = "zai"
+	// GitHub personal access token (free with any GitHub account)
+	ProviderGitHub ProviderType = "github"
 )
 
 type ToolPerm string

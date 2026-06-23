@@ -60,14 +60,22 @@ func (a *App) shutdown(_ context.Context) {
 	_ = store.Close()
 }
 
-func (a *App) buildAgent(workDir string) *appLayer.ConversationalAgent {
-	var provider domain.LLMProvider
+func (a *App) newProvider() domain.LLMProvider {
 	switch a.cfg.Provider {
 	case config.ProviderOpenAI:
-		provider = llm.NewOpenAIProvider(a.cfg.BaseURL, a.cfg.APIKey)
+		return llm.NewOpenAIProvider(a.cfg.BaseURL, a.cfg.APIKey)
+	case config.ProviderOllama:
+		return llm.NewOllamaProvider(a.cfg.BaseURL)
 	default:
-		provider = llm.NewOllamaProvider(a.cfg.BaseURL)
+		if info, ok := llm.FreeProviderConfigs[string(a.cfg.Provider)]; ok {
+			return llm.NewFreeProvider(info.BaseURL, a.cfg.APIKey, info.Models)
+		}
+		return llm.NewOllamaProvider(a.cfg.BaseURL)
 	}
+}
+
+func (a *App) buildAgent(workDir string) *appLayer.ConversationalAgent {
+	provider := a.newProvider()
 
 	registry := tools.DefaultRegistryWithMCP(workDir, a.cfg.MCPServers)
 	agent := appLayer.NewConversationalAgent(a.cfg.Model, provider, registry, a.cfg.SystemPrompt, a.cfg.ContextLimit)
@@ -450,13 +458,7 @@ type ModelList struct {
 }
 
 func (a *App) ListModels() ModelList {
-	var provider domain.LLMProvider
-	switch a.cfg.Provider {
-	case config.ProviderOpenAI:
-		provider = llm.NewOpenAIProvider(a.cfg.BaseURL, a.cfg.APIKey)
-	default:
-		provider = llm.NewOllamaProvider(a.cfg.BaseURL)
-	}
+	provider := a.newProvider()
 	models, err := provider.ListModels()
 	if err != nil {
 		return ModelList{Error: err.Error()}

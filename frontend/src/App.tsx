@@ -493,7 +493,7 @@ export default function App() {
             <div className="brand-icon">🤖</div>
             <div>
               <div className="brand-name">AI Agent</div>
-              <div className="brand-sub">Powered by Ollama</div>
+              <div className="brand-sub">Powered by Komajdon</div>
             </div>
           </div>
           <button className="new-btn" onClick={() => setShowNew(true)}>＋ New conversation</button>
@@ -550,7 +550,23 @@ export default function App() {
                 title="Model for this conversation"
               >
                 {models.length > 0
-                  ? models.map(m => <option key={m} value={m}>{m}</option>)
+                  ? (() => {
+                      const freeModels = models.filter(m => m.endsWith(':free'))
+                      const paidModels = models.filter(m => !m.endsWith(':free'))
+                      if (freeModels.length > 0 && paidModels.length > 0) {
+                        return (
+                          <>
+                            <optgroup label="── Free ──">
+                              {freeModels.map(m => <option key={m} value={m}>{m}</option>)}
+                            </optgroup>
+                            <optgroup label="── Paid ──">
+                              {paidModels.map(m => <option key={m} value={m}>{m}</option>)}
+                            </optgroup>
+                          </>
+                        )
+                      }
+                      return models.map(m => <option key={m} value={m}>{m}</option>)
+                    })()
                   : <option value={convModel || cfg.model}>{convModel || cfg.model}</option>
                 }
               </select>
@@ -914,22 +930,44 @@ export default function App() {
                 <div className="field">
                   <label>Provider</label>
                   <select value={cfg.provider} onChange={e => setCfg(c => ({ ...c, provider: e.target.value }))}>
-                    <option value="ollama">Ollama</option>
-                    <option value="openai">OpenAI-compatible</option>
+                    <optgroup label="── Free · No API Key ──">
+                      <option value="ollama">Ollama (local)</option>
+                      <option value="llm7">LLM7.io — DeepSeek, GPT-4o, Gemini</option>
+                      <option value="zai">Z AI (Zhipu) — GLM-4.7-Flash</option>
+                    </optgroup>
+                    <optgroup label="── Free Tier · API Token Required ──">
+                      <option value="github">GitHub Models — GPT-5, Llama 4, Grok 3</option>
+                      <option value="groq">Groq — Llama 4, Qwen3, GPT-OSS</option>
+                      <option value="gemini">Google Gemini (AI Studio)</option>
+                      <option value="cerebras">Cerebras — GPT-OSS-120B (very fast)</option>
+                      <option value="openrouter">OpenRouter — 10+ free models</option>
+                      <option value="mistral">Mistral AI</option>
+                      <option value="cohere">Cohere</option>
+                      <option value="together">Together AI</option>
+                      <option value="huggingface">Hugging Face</option>
+                      <option value="sambanova">SambaNova Cloud</option>
+                      <option value="nvidia">NVIDIA NIM</option>
+                    </optgroup>
+                    <optgroup label="── Paid / Custom ──">
+                      <option value="openai">OpenAI-compatible</option>
+                    </optgroup>
                   </select>
                 </div>
 
-                <div className="field">
-                  <label>Base URL</label>
-                  <input value={cfg.base_url} onChange={e => setCfg(c => ({ ...c, base_url: e.target.value }))}
-                    placeholder="http://localhost:11434" />
-                </div>
-
-                {cfg.provider === 'openai' && (
+                {(cfg.provider === 'ollama' || cfg.provider === 'openai') && (
                   <div className="field">
-                    <label>API Key</label>
+                    <label>Base URL</label>
+                    <input value={cfg.base_url} onChange={e => setCfg(c => ({ ...c, base_url: e.target.value }))}
+                      placeholder="http://localhost:11434" />
+                  </div>
+                )}
+
+                {!['ollama', 'llm7', 'zai'].includes(cfg.provider) && (
+                  <div className="field">
+                    <label>API Key{cfg.provider === 'github' ? ' (GitHub PAT with models:read)' : ''}</label>
                     <input type="password" value={cfg.api_key}
-                      onChange={e => setCfg(c => ({ ...c, api_key: e.target.value }))} placeholder="sk-…" />
+                      onChange={e => setCfg(c => ({ ...c, api_key: e.target.value }))}
+                      placeholder={cfg.provider === 'github' ? 'github_pat_…' : 'sk-…'} />
                   </div>
                 )}
 
@@ -937,7 +975,23 @@ export default function App() {
                   <label>Default Model</label>
                   {models.length > 0
                     ? <select value={cfg.model} onChange={e => setCfg(c => ({ ...c, model: e.target.value }))}>
-                        {models.map(m => <option key={m} value={m}>{m}</option>)}
+                        {(() => {
+                          const freeModels = models.filter(m => m.endsWith(':free'))
+                          const paidModels = models.filter(m => !m.endsWith(':free'))
+                          if (freeModels.length > 0 && paidModels.length > 0) {
+                            return (
+                              <>
+                                <optgroup label="── Free ──">
+                                  {freeModels.map(m => <option key={m} value={m}>{m}</option>)}
+                                </optgroup>
+                                <optgroup label="── Paid ──">
+                                  {paidModels.map(m => <option key={m} value={m}>{m}</option>)}
+                                </optgroup>
+                              </>
+                            )
+                          }
+                          return models.map(m => <option key={m} value={m}>{m}</option>)
+                        })()}
                       </select>
                     : <input value={cfg.model} onChange={e => setCfg(c => ({ ...c, model: e.target.value }))} placeholder="gemma2:27b" />
                   }
