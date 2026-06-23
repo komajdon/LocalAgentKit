@@ -797,6 +797,14 @@ export default function App() {
                   Each server runs as a subprocess and exposes tools via the <strong>Model Context Protocol</strong>.
                 </div>
 
+                <div className="mcp-prereq-banner">
+                  <span className="mcp-prereq-icon">⚠️</span>
+                  <div>
+                    <strong>Before using MCP servers</strong> — each server is a separate program that must be installed on your machine first.<br />
+                    Use <strong>Test Connection</strong> on each card to verify it works before starting a conversation.
+                  </div>
+                </div>
+
                 <div className="mcp-presets">
                   <div className="mcp-presets-label">Quick Add</div>
                   <div className="mcp-presets-row">
@@ -837,20 +845,39 @@ export default function App() {
 
                     {srv.name === 'postgres' && (
                       <div className="mcp-setup-hint">
-                        <strong>🐘 PostgreSQL setup:</strong> Replace the connection string in Args with your actual database URL.
-                        Requires Node.js. Install once: <code>npm i -g @modelcontextprotocol/server-postgres</code>
+                        <div className="mcp-setup-title">🐘 PostgreSQL — setup required</div>
+                        <ol className="mcp-setup-steps">
+                          <li>Install Node.js if not already: <a href="https://nodejs.org" target="_blank" rel="noreferrer">nodejs.org</a></li>
+                          <li>Install the MCP server once:<br /><code>npm install -g @modelcontextprotocol/server-postgres</code></li>
+                          <li>Change <strong>Command</strong> to <code>mcp-server-postgres</code> and remove the <code>-y</code> / package name from Args</li>
+                          <li>Replace the connection string in Args with your actual Postgres URL</li>
+                          <li>Click <strong>Test Connection</strong> to verify before saving</li>
+                        </ol>
                       </div>
                     )}
                     {srv.name === 'mongodb' && (
                       <div className="mcp-setup-hint">
-                        <strong>🍃 MongoDB setup:</strong> Replace the <code>--connectionString</code> value in Args with your MongoDB URI.
-                        Requires Node.js. Install once: <code>npm i -g mongodb-mcp-server</code>
+                        <div className="mcp-setup-title">🍃 MongoDB — setup required</div>
+                        <ol className="mcp-setup-steps">
+                          <li>Install Node.js if not already: <a href="https://nodejs.org" target="_blank" rel="noreferrer">nodejs.org</a></li>
+                          <li>Install the MCP server once:<br /><code>npm install -g mongodb-mcp-server</code></li>
+                          <li>Change <strong>Command</strong> to <code>mongodb-mcp-server</code> and clear the Args (no npx flags needed)</li>
+                          <li>Add your connection string to Args: <code>--connectionString mongodb://localhost:27017/mydb</code></li>
+                          <li>Click <strong>Test Connection</strong> to verify before saving</li>
+                        </ol>
                       </div>
                     )}
                     {srv.name === 'gdrive' && (
                       <div className="mcp-setup-hint">
-                        <strong>📂 Google Drive setup:</strong> Set <code>GDRIVE_CREDENTIALS_FILE</code> to your OAuth2 credentials JSON downloaded from Google Cloud Console, and <code>GDRIVE_TOKEN_FILE</code> to a writable path for the token cache.
-                        Requires Node.js. Install once: <code>npm i -g @modelcontextprotocol/server-gdrive</code>
+                        <div className="mcp-setup-title">📂 Google Drive — setup required</div>
+                        <ol className="mcp-setup-steps">
+                          <li>Install Node.js if not already: <a href="https://nodejs.org" target="_blank" rel="noreferrer">nodejs.org</a></li>
+                          <li>Install the MCP server once:<br /><code>npm install -g @modelcontextprotocol/server-gdrive</code></li>
+                          <li>Create OAuth2 credentials in <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer">Google Cloud Console</a> → APIs &amp; Services → Credentials</li>
+                          <li>Set <code>GDRIVE_CREDENTIALS_FILE</code> in Env vars to the downloaded JSON path</li>
+                          <li>Set <code>GDRIVE_TOKEN_FILE</code> to a writable path (e.g. <code>/home/you/.gdrive-token.json</code>)</li>
+                          <li>Click <strong>Test Connection</strong> to verify before saving</li>
+                        </ol>
                       </div>
                     )}
 
@@ -904,7 +931,16 @@ export default function App() {
                             const tools = await ProbeMCPServer(srv as any) as any
                             setMcpProbeResult(r => ({ ...r, [i]: `✓ Connected — ${tools?.length || 0} tools: ${(tools || []).join(', ')}` }))
                           } catch (err: any) {
-                            setMcpProbeResult(r => ({ ...r, [i]: `✗ ${err?.message || String(err)}` }))
+                            const msg: string = err?.message || String(err)
+                            let hint = ''
+                            if (msg.includes('ERR_MODULE_NOT_FOUND') || msg.includes('bson') || msg.includes('process exited')) {
+                              hint = ` — package not installed or broken cache. Run: npm install -g ${srv.args[1] || srv.command} then set Command to the package binary name.`
+                            } else if (msg.includes('ENOENT') || msg.includes('not found')) {
+                              hint = ` — command "${srv.command}" not found. Is Node.js installed and is the package installed globally?`
+                            } else if (msg.includes('ECONNREFUSED') || msg.includes('connect')) {
+                              hint = ` — could not connect. Is the service (e.g. database) running?`
+                            }
+                            setMcpProbeResult(r => ({ ...r, [i]: `✗ ${msg}${hint}` }))
                           } finally {
                             setMcpProbing(p => ({ ...p, [i]: false }))
                           }

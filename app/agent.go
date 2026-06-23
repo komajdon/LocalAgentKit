@@ -193,7 +193,18 @@ func (a *ConversationalAgent) trimToContextLimit() {
 }
 
 // buildSystemPrompt generates the tool-use instructions from the registry.
+// MCP tools (name contains "__") are listed first with an explicit preference
+// rule so the agent does not fall back to shell for tasks an MCP tool covers.
 func buildSystemPrompt(r *domain.ToolRegistry) string {
+	var mcpTools, builtinTools []domain.Tool
+	for _, t := range r.All() {
+		if strings.Contains(t.Name(), "__") {
+			mcpTools = append(mcpTools, t)
+		} else {
+			builtinTools = append(builtinTools, t)
+		}
+	}
+
 	var sb strings.Builder
 	sb.WriteString(`You are a personal AI assistant with access to tools.
 To use a tool, output a JSON block on its own line:
@@ -203,11 +214,26 @@ TOOL_CALL: {"tool": "<tool_name>", "args": {<key>: <value>, ...}}
 Wait for the TOOL_RESULT before continuing. Call tools one at a time.
 After gathering all information, give your final answer.
 
-Available tools:
+IMPORTANT TOOL PRIORITY RULE:
+Always prefer MCP tools over built-in tools (especially shell) when an MCP
+tool is available for the task. For example, if a mongodb MCP tool exists,
+use it instead of running mongosh via shell. Only fall back to shell if no
+suitable MCP tool covers the operation.
 `)
-	for _, t := range r.All() {
+
+	if len(mcpTools) > 0 {
+		sb.WriteString("\n## MCP Tools (prefer these first)\n")
+		for _, t := range mcpTools {
+			sb.WriteString("\n- **" + t.Name() + "**: " + t.Description() + "\n")
+			sb.WriteString("  Parameters: " + t.Parameters() + "\n")
+		}
+	}
+
+	sb.WriteString("\n## Built-in Tools\n")
+	for _, t := range builtinTools {
 		sb.WriteString("\n- **" + t.Name() + "**: " + t.Description() + "\n")
 		sb.WriteString("  Parameters: " + t.Parameters() + "\n")
 	}
+
 	return sb.String()
 }
