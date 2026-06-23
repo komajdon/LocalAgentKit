@@ -1,10 +1,15 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -466,9 +471,213 @@ func (a *App) ListModels() ModelList {
 	return ModelList{Models: models}
 }
 
-func (a *App) GetConfig() config.Config { return a.cfg }
+// ── Version & updates ─────────────────────────────────────────────────────────
+
+// UpdateInfo is returned by CheckForUpdate.
+type UpdateInfo struct {
+	Available bool   `json:"available"`
+	Current   string `json:"current"`
+	Latest    string `json:"latest"`
+	URL       string `json:"url"`
+}
+
+// GetVersion returns the version string embedded at build time.
+func (a *App) GetVersion() string { return Version }
+
+// CheckForUpdate fetches the latest GitHub release and compares it with the
+// current build version. Returns immediately on any network error (no crash).
+func (a *App) CheckForUpdate() UpdateInfo {
+	info := UpdateInfo{Current: Version}
+	if Version == "dev" {
+		return info // skip update checks in dev builds
+	}
+
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, err := http.NewRequest(http.MethodGet,
+		"https://api.github.com/repos/komajdon/LocalAgentKit/releases/latest", nil)
+	if err != nil {
+		return info
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return info
+	}
+	defer resp.Body.Close()
+
+	var payload struct {
+		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil || payload.TagName == "" {
+		return info
+	}
+	info.Latest = payload.TagName
+	info.URL = payload.HTMLURL
+	info.Available = isNewerVersion(payload.TagName, Version)
+	return info
+}
+
+// isNewerVersion returns true when latest is semantically greater than current.
+// Both strings may have a leading "v".
+func isNewerVersion(latest, current string) bool {
+	parse := func(s string) [3]int {
+		s = strings.TrimPrefix(s, "v")
+		parts := strings.SplitN(s, ".", 3)
+		var nums [3]int
+		for i, p := range parts {
+			if i >= 3 {
+				break
+			}
+			fmt.Sscanf(p, "%d", &nums[i])
+		}
+		return nums
+	}
+	l, c := parse(latest), parse(current)
+	for i := range l {
+		if l[i] != c[i] {
+			return l[i] > c[i]
+		}
+	}
+	return false
+}
+
+// ── Config backup & restore ───────────────────────────────────────────────────
+
+// ExportBackup opens a save-file dialog and writes a .tar.gz containing
+// agent.db and agent.key. Returns an error string or "" on success.
+func (a *App) ExportBackup() string {
+	dest, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Export Backup",
+		DefaultFilename: "ai-agent-backup.tar.gz",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Backup archive (*.tar.gz)", Pattern: "*.tar.gz"},
+		},
+	})
+	if err != nil || dest == "" {
+		return ""
+	}
+
+	dataDir := store.DataDir()
+	if err := writeBackupArchive(dest, dataDir); err != nil {
+		return "Backup failed: " + err.Error()
+	}
+	return ""
+}
+
+// ImportBackup opens a file-picker dialog and restores agent.db + agent.key
+// from a .tar.gz created by ExportBackup. The app must be restarted afterward.
+// Returns an error string or "" on success.
+func (a *App) ImportBackup() string {
+	src, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Restore Backup",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Backup archive (*.tar.gz)", Pattern: "*.tar.gz"},
+		},
+	})
+	if err != nil || src == "" {
+		return ""
+	}
+
+	dataDir := store.DataDir()
+	if err := readBackupArchive(src, dataDir); err != nil {
+		return "Restore failed: " + err.Error()
+	}
+	return "ok" // signal frontend to prompt for restart
+}
+
+func writeBackupArchive(dest, dataDir string) error {
+	f, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gz := gzip.NewWriter(f)
+	defer gz.Close()
+	tw := tar.NewWriter(gz)
+	defer tw.Close()
+
+	for _, name := range []string{"agent.db", "agent.key"} {
+		path := filepath.Join(dataDir, name)
+		fi, err := os.Stat(path)
+		if err != nil {
+			continue // skip missing files (e.g. key not yet created)
+		}
+		hdr, err := tar.FileInfoHeader(fi, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = name
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if _, err := tw.Write(data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readBackupArchive(src, dataDir string) error {
+	f, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return err
+	}
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		// Only restore the two known files; ignore anything else.
+		if hdr.Name != "agent.db" && hdr.Name != "agent.key" {
+			continue
+		}
+		dest := filepath.Join(dataDir, hdr.Name)
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(dest, data, 0600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *App) GetConfig() config.Config {
+	safe := a.cfg
+	if len(safe.APIKey) > 4 {
+		safe.APIKey = "***" + safe.APIKey[len(safe.APIKey)-4:]
+	}
+	return safe
+}
 
 func (a *App) SaveConfig(cfg config.Config) string {
+	// If the key was returned masked (starts with ***), keep the real stored key.
+	if strings.HasPrefix(cfg.APIKey, "***") {
+		cfg.APIKey = a.cfg.APIKey
+	}
 	a.cfg = cfg
 	if err := config.Save(cfg); err != nil {
 		return err.Error()

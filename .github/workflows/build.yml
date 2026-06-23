@@ -210,13 +210,19 @@ jobs:
           json.dump(j, open(p, 'w'), indent=2)
           PY
 
+      - name: Resolve version tag
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME:-dev}"
+          echo "BUILD_VERSION=${TAG}" >> "$GITHUB_ENV"
+
       - name: Build (Linux)
         if: runner.os == 'Linux'
-        run: wails build -platform ${{ matrix.platform }} -tags webkit2_41 -o ${{ matrix.artifact }}
+        run: wails build -platform ${{ matrix.platform }} -tags webkit2_41 -o ${{ matrix.artifact }} -ldflags "-X main.Version=${{ env.BUILD_VERSION }}"
 
       - name: Build (macOS)
         if: runner.os == 'macOS'
-        run: wails build -platform ${{ matrix.platform }} -o ${{ matrix.artifact }}
+        run: wails build -platform ${{ matrix.platform }} -o ${{ matrix.artifact }} -ldflags "-X main.Version=${{ env.BUILD_VERSION }}"
 
       - name: Rename macOS bundle to expected name
         if: runner.os == 'macOS'
@@ -230,7 +236,7 @@ jobs:
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: wails build -platform ${{ matrix.platform }} -o ${{ matrix.artifact }}
+        run: wails build -platform ${{ matrix.platform }} -o ${{ matrix.artifact }} -ldflags "-X main.Version=${{ env.BUILD_VERSION }}"
 
       # ── Verify build output ───────────────────────────────────────────────────
       - name: Verify build output
@@ -312,10 +318,55 @@ jobs:
           path: ${{ matrix.artifact }}-lite.zip
           if-no-files-found: error
 
+  # ── Flatpak (Linux only, tags + manual dispatch) ─────────────────────────────
+  flatpak:
+    name: Build Flatpak
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Download the already-built Linux amd64 artifact so we don't rebuild.
+      - name: Download Linux amd64 full artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-agent-linux-amd64-full
+          path: linux-artifact/
+
+      - name: Extract Linux artifact
+        run: tar -xzf linux-artifact/ai-agent-linux-amd64-full.tar.gz -C linux-artifact/
+
+      # Stage all files that the Flatpak manifest sources section expects.
+      - name: Stage Flatpak source directory
+        run: |
+          mkdir -p flatpak-src
+          cp linux-artifact/ai-agent-linux-amd64   flatpak-src/ai-agent
+          cp linux-artifact/whisper                 flatpak-src/whisper
+          cp build/appicon.png                      flatpak-src/com.bluewhale.AIAgent.png
+          cp build/linux/com.bluewhale.AIAgent.desktop flatpak-src/
+          chmod +x flatpak-src/ai-agent flatpak-src/whisper
+
+      - name: Build Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: ai-agent-linux-amd64.flatpak
+          manifest-path: build/linux/com.bluewhale.AIAgent.yml
+          cache-key: flatpak-${{ hashFiles('build/linux/com.bluewhale.AIAgent.yml') }}
+
+      - name: Upload Flatpak artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-agent-linux-amd64-flatpak
+          path: ai-agent-linux-amd64.flatpak
+          if-no-files-found: error
+
   # ── Create GitHub Release (only on version tags) ─────────────────────────────
   release:
     name: Create Release
-    needs: build
+    needs: [build, flatpak]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:

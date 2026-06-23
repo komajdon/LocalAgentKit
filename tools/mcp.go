@@ -74,8 +74,9 @@ func startMCPClient(cfg config.MCPServerConfig) (*mcpClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Capture stderr so failures are visible in logs instead of being silently dropped.
-	cmd.Stderr = os.Stderr
+	// Discard MCP subprocess stderr — it may contain connection strings, passwords,
+	// or query logs from database drivers. Protocol errors are surfaced via JSON-RPC responses.
+	cmd.Stderr = nil
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start MCP server %q: %w", cfg.Name, err)

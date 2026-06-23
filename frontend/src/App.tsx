@@ -9,6 +9,7 @@ import {
   ListModels, ListTools, GetConfig, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, SaveMCPServers, ProbeMCPServer,
+  CheckForUpdate, GetVersion, ExportBackup, ImportBackup,
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -54,6 +55,7 @@ interface Cfg {
 }
 
 interface ContextUsage { used: number; limit: number }
+interface UpdateInfo { available: boolean; current: string; latest: string; url: string }
 
 let seq = 0
 const uid = () => ++seq
@@ -123,6 +125,10 @@ export default function App() {
   // context usage
   const [ctxUsage, setCtxUsage] = useState<ContextUsage | null>(null)
   const [fatalError, setFatalError] = useState('')
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [updateDismissed, setUpdateDismissed] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
+  const [backupMsg, setBackupMsg] = useState('')
 
   // search
   const [searchQuery, setSearchQuery]   = useState('')
@@ -190,6 +196,8 @@ export default function App() {
     ListTools().then((t: any) => setToolList(t || [])).catch(() => {})
     WhisperAvailable().then(ok => setWhisperReady(ok)).catch(() => {})
     ListMCPServers().then((s: any) => setMcpServers(s || [])).catch(() => {})
+    GetVersion().then(v => setAppVersion(v)).catch(() => {})
+    CheckForUpdate().then((info: any) => { if (info?.available) setUpdateInfo(info) }).catch(() => {})
     refreshList()
   }, [])
 
@@ -486,6 +494,14 @@ export default function App() {
         </div>
       )}
 
+      {updateInfo && !updateDismissed && (
+        <div className="update-banner">
+          <span>🎉 <strong>v{updateInfo.latest}</strong> is available — you're on {updateInfo.current}</span>
+          <a href={updateInfo.url} target="_blank" rel="noreferrer" className="update-download-btn">Download</a>
+          <button className="update-dismiss" onClick={() => setUpdateDismissed(true)}>✕</button>
+        </div>
+      )}
+
       {/* ── Sidebar ── */}
       <aside className="sidebar">
         <div className="sidebar-head">
@@ -754,7 +770,9 @@ export default function App() {
                         <div key={k} className="arg-line">
                           <span className="arg-k">{k}</span>
                           <span className="arg-sep">: </span>
-                          <span>{v}</span>
+                          {permReq.tool === 'shell' && k === 'command'
+                            ? <pre className="arg-shell-cmd">{v}</pre>
+                            : <span>{v}</span>}
                         </div>
                       ))}
                     </div>
@@ -1069,6 +1087,38 @@ export default function App() {
                     </div>
                   )}
                 </div>
+
+                <div className="field">
+                  <label>Data Backup</label>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="btn secondary" onClick={async () => {
+                      setBackupMsg('')
+                      const err = await ExportBackup() as any
+                      setBackupMsg(err || '✓ Backup saved')
+                    }}>Export backup…</button>
+                    <button className="btn secondary" onClick={async () => {
+                      setBackupMsg('')
+                      const result = await ImportBackup() as any
+                      if (result === 'ok') setBackupMsg('✓ Restored — please restart the app')
+                      else if (result) setBackupMsg('✗ ' + result)
+                    }}>Restore backup…</button>
+                  </div>
+                  {backupMsg && (
+                    <div className="field-hint" style={{ color: backupMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)' }}>
+                      {backupMsg}
+                    </div>
+                  )}
+                  <div className="field-hint">
+                    Exports <code>agent.db</code> + <code>agent.key</code> as a <code>.tar.gz</code>.
+                    Keep the backup in a safe place — it contains your encryption key.
+                  </div>
+                </div>
+
+                {appVersion && (
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 8 }}>
+                    Version: {appVersion}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="modal-body">

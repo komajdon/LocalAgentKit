@@ -1,0 +1,30 @@
+app-id: com.bluewhale.AIAgent
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk//46
+command: ai-agent
+
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=home
+  - --share=network
+  - --talk-name=org.freedesktop.Notifications
+
+modules:
+  - name: ai-agent
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 ai-agent            /app/bin/ai-agent
+      - install -Dm755 whisper             /app/bin/whisper
+      - install -Dm644 com.bluewhale.AIAgent.png
+          /app/share/icons/hicolor/256x256/apps/com.bluewhale.AIAgent.png
+      - install -Dm644 com.bluewhale.AIAgent.desktop
+          /app/share/applications/com.bluewhale.AIAgent.desktop
+    sources:
+      # flatpak-src/ is staged by CI before flatpak-builder runs.
+      # It contains: ai-agent, whisper, *.desktop, *.png
+      - type: dir
+        path: flatpak-src

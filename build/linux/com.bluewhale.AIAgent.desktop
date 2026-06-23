@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=AI Agent
+GenericName=Personal AI Agent
+Comment=Personal AI Agent powered by local and cloud LLMs
+Exec=ai-agent
+Icon=com.bluewhale.AIAgent
+Type=Application
+Categories=Utility;Development;ArtificialIntelligence;
+StartupNotify=true
+StartupWMClass=ai-agent

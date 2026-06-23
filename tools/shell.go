@@ -21,7 +21,14 @@ func (t *shellTool) Parameters() string {
 	return `{"command": "bash command to run", "dir": "working directory (optional, defaults to conversation work dir)"}`
 }
 
+const maxCommandLen = 10_000
+
 func (t *shellTool) Execute(args map[string]string) string {
+	command := args["command"]
+	if len(command) > maxCommandLen {
+		return fmt.Sprintf("ERROR: command exceeds maximum length (%d > %d chars)", len(command), maxCommandLen)
+	}
+
 	dir := args["dir"]
 	if dir == "" {
 		dir = t.workDir
@@ -32,7 +39,7 @@ func (t *shellTool) Execute(args map[string]string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), shellTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", args["command"])
+	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {

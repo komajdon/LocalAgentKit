@@ -3,21 +3,20 @@ package main
 import (
 	"context"
 	"embed"
-	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
 
+// Version is set at build time via -ldflags "-X main.Version=vX.Y.Z".
+// Defaults to "dev" for local builds.
+var Version = "dev"
+
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
-	// Allow WebKit2GTK renderer to access media devices.
-	// Without this the sandbox blocks getUserMedia on Linux.
-	os.Setenv("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1")
-
 	app := NewApp()
 
 	// Create application with options

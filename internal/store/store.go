@@ -60,10 +60,19 @@ func Close() error {
 	return nil
 }
 
-// DataDir returns the directory where the database should be stored:
-// a "data/" folder next to the running executable.
-// Falls back to ~/.ai-agent/data if the executable path cannot be resolved.
+// DataDir returns the directory where the database should be stored.
+// Priority order:
+//  1. Inside a Flatpak sandbox: $XDG_DATA_HOME/ai-agent (writable per-app dir)
+//  2. data/ folder next to the running executable (standard install)
+//  3. ~/.ai-agent/data (fallback when exe path cannot be resolved)
 func DataDir() string {
+	// Flatpak sets FLATPAK_ID and XDG_DATA_HOME; /app is read-only so we must
+	// use the sandboxed data dir (~/.var/app/<id>/data) for all writes.
+	if os.Getenv("FLATPAK_ID") != "" {
+		if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+			return filepath.Join(xdg, "ai-agent")
+		}
+	}
 	exe, err := os.Executable()
 	if err == nil {
 		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
