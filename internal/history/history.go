@@ -104,8 +104,12 @@ func Delete(id string) error {
 	return store.Delete(bucket, id)
 }
 
-// Export returns the conversation as Markdown or plain text.
+// Export returns the conversation as Markdown, plain text, or JSON.
 func Export(c *Conversation, format string) string {
+	if format == "json" {
+		b, _ := json.Marshal(c)
+		return string(b)
+	}
 	var sb strings.Builder
 	if format == "markdown" {
 		sb.WriteString("# " + c.Title + "\n\n")

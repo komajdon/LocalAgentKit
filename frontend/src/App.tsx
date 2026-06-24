@@ -99,11 +99,14 @@ export default function App() {
   const [items, setItems]     = useState<Item[]>([])
   const [input, setInput]     = useState('')
   const [running, setRunning] = useState(false)
+  const [thinking, setThinking] = useState(false)
+  const [loadingConv, setLoadingConv] = useState(false)
   const [permReq, setPermReq] = useState<PermReq | null>(null)
   const streamIdRef = useRef<number | null>(null)
 
   const [showNew, setShowNew]     = useState(false)
   const [showCfg, setShowCfg]     = useState(false)
+  const [savingCfg, setSavingCfg] = useState(false)
   const [newPath, setNewPath]     = useState('')
   const [cfgTab, setCfgTab]       = useState<'general' | 'permissions' | 'mcp'>('general')
 
@@ -121,6 +124,7 @@ export default function App() {
   const [transcribing, setTranscribing]       = useState(false)
   const [whisperStatus, setWhisperStatus]     = useState('') // download progress label
   const [sttError, setSttError]               = useState('')
+  const recordingRef                          = useRef(false)
 
   // context usage
   const [ctxUsage, setCtxUsage] = useState<ContextUsage | null>(null)
@@ -133,6 +137,7 @@ export default function App() {
   // search
   const [searchQuery, setSearchQuery]   = useState('')
   const [searchResults, setSearchResults] = useState<ConvMeta[] | null>(null)
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // per-conversation model selector
   const [convModel, setConvModel] = useState('')
@@ -206,7 +211,10 @@ export default function App() {
   useEffect(() => {
     const offs: (() => void)[] = []
 
+    offs.push(EventsOn('chat:thinking', () => setThinking(true)))
+
     offs.push(EventsOn('chat:chunk', (chunk: string) => {
+      setThinking(false)
       if (streamIdRef.current !== null) {
         // Append to the existing streaming message — no side-effects needed.
         const sid = streamIdRef.current
@@ -225,7 +233,7 @@ export default function App() {
     }))
 
     offs.push(EventsOn('chat:done', () => {
-      setRunning(false)
+      setRunning(false); setThinking(false)
       setItems(prev => prev.map(it =>
         it.type === 'msg' && it.data.id === streamIdRef.current
           ? { ...it, data: { ...it.data, streaming: false } }
@@ -236,7 +244,7 @@ export default function App() {
     }))
 
     offs.push(EventsOn('chat:stopped', () => {
-      setRunning(false)
+      setRunning(false); setThinking(false)
       const sid = streamIdRef.current
       streamIdRef.current = null
       setItems(prev => prev.map(it =>
@@ -247,7 +255,7 @@ export default function App() {
     }))
 
     offs.push(EventsOn('chat:error', (msg: string) => {
-      setRunning(false)
+      setRunning(false); setThinking(false)
       streamIdRef.current = null
       setItems(prev => [...prev, { type: 'error', id: uid(), text: msg }])
     }))
@@ -305,7 +313,13 @@ export default function App() {
   const refreshList = () => ListConversations().then((l: any) => setConvList(l || []))
 
   const openConv = async (id: string) => {
-    const conv = await LoadConversation(id) as SavedConv
+    setLoadingConv(true)
+    let conv: SavedConv
+    try {
+      conv = await LoadConversation(id) as SavedConv
+    } finally {
+      setLoadingConv(false)
+    }
     setActiveId(conv.id); setActiveTitle(conv.title); setActivePath(conv.work_dir)
     setConvModel((conv as any).model || '')
     setCtxUsage(null)
@@ -363,7 +377,7 @@ export default function App() {
     const text = input.trim()
     if (!text || running || !activeId) return
     setItems(prev => [...prev, { type: 'msg', data: { id: uid(), role: 'user', text } }])
-    setInput(''); setRunning(true); streamIdRef.current = null
+    setInput(''); setRunning(true); setThinking(true); streamIdRef.current = null
     SendMessage(text)
   }, [input, running, activeId])
 
@@ -387,16 +401,21 @@ export default function App() {
   }
 
   const startRecording = async () => {
+    if (recordingRef.current) return
+    recordingRef.current = true
     setSttError('')
     try {
       await StartRecording()
       setRecording(true)
     } catch (err: any) {
+      recordingRef.current = false
       setSttError(`Could not start recording: ${err?.message ?? err}`)
     }
   }
 
   const stopRecording = async () => {
+    if (!recordingRef.current) return
+    recordingRef.current = false
     setRecording(false)
     setTranscribing(true)
     try {
@@ -409,20 +428,25 @@ export default function App() {
     }
   }
 
-  const runSearch = async (q: string) => {
+  const runSearch = (q: string) => {
     setSearchQuery(q)
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
     if (!q.trim()) { setSearchResults(null); return }
-    const r = await SearchConversations(q) as ConvMeta[]
-    setSearchResults(r || [])
+    searchTimerRef.current = setTimeout(async () => {
+      const r = await SearchConversations(q) as ConvMeta[]
+      setSearchResults(r || [])
+    }, 300)
   }
 
-  const exportConv = async (format: 'markdown' | 'text') => {
+  const exportConv = async (format: 'markdown' | 'text' | 'json') => {
     if (!activeId) return
     const text = await ExportConversation(activeId, format) as string
-    const blob = new Blob([text], { type: format === 'markdown' ? 'text/markdown' : 'text/plain' })
+    const mime = format === 'markdown' ? 'text/markdown' : format === 'json' ? 'application/json' : 'text/plain'
+    const ext = format === 'markdown' ? 'md' : format === 'json' ? 'json' : 'txt'
+    const blob = new Blob([text], { type: mime })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = `${activeTitle || 'conversation'}.${format === 'markdown' ? 'md' : 'txt'}`
+    a.href = url; a.download = `${activeTitle || 'conversation'}.${ext}`
     a.click(); URL.revokeObjectURL(url)
   }
 
@@ -432,11 +456,16 @@ export default function App() {
   }
 
   const saveCfg = async () => {
-    await SaveConfig({ ...cfg, mcp_servers: mcpServers } as any)
-    await SaveMCPServers(mcpServers as any)
-    const r = await ListModels() as any
-    if (r.models) setModels(r.models)
-    setShowCfg(false)
+    setSavingCfg(true)
+    try {
+      await SaveConfig({ ...cfg, mcp_servers: mcpServers } as any)
+      await SaveMCPServers(mcpServers as any)
+      const r = await ListModels() as any
+      if (r.models) setModels(r.models)
+      setShowCfg(false)
+    } finally {
+      setSavingCfg(false)
+    }
   }
 
   const setToolPerm = (tool: string, perm: PermMode) =>
@@ -561,10 +590,11 @@ export default function App() {
               {/* per-conversation model selector */}
               <select
                 className="topbar-model-sel"
-                value={convModel || cfg.model}
+                value={convModel}
                 onChange={e => changeConvModel(e.target.value)}
                 title="Model for this conversation"
               >
+                <option value="">↩ Default ({cfg.model})</option>
                 {models.length > 0
                   ? (() => {
                       const freeModels = models.filter(m => m.endsWith(':free'))
@@ -583,7 +613,7 @@ export default function App() {
                       }
                       return models.map(m => <option key={m} value={m}>{m}</option>)
                     })()
-                  : <option value={convModel || cfg.model}>{convModel || cfg.model}</option>
+                  : null
                 }
               </select>
 
@@ -605,6 +635,7 @@ export default function App() {
                 <div className="export-dropdown">
                   <button onClick={() => exportConv('markdown')}>Export as Markdown</button>
                   <button onClick={() => exportConv('text')}>Export as Plain Text</button>
+                  <button onClick={() => exportConv('json')}>Export as JSON</button>
                 </div>
               </div>
 
@@ -614,7 +645,10 @@ export default function App() {
             </div>
 
             <div className="messages">
-              {items.length === 0 && (
+              {loadingConv && (
+                <div className="conv-loading"><span className="thinking-dots"><span /><span /><span /></span></div>
+              )}
+              {!loadingConv && items.length === 0 && (
                 <div className="empty-state">
                   <div className="empty-icon">🤖</div>
                   <h2>Ready to help</h2>
@@ -645,7 +679,7 @@ export default function App() {
                           : <span>{m.text}{m.streaming && <span className="cursor" />}</span>
                         }
                       </div>
-                      {m.role === 'assistant' && !m.streaming && (
+                      {!m.streaming && (
                         <button
                           className={`copy-btn ${copiedId === m.id ? 'copied' : ''}`}
                           onClick={() => copyMessage(m.id, m.text)}
@@ -658,6 +692,16 @@ export default function App() {
                   </div>
                 )
               })}
+              {thinking && running && (
+                <div className="msg-row assistant">
+                  <div className="av assistant">🤖</div>
+                  <div className="bubble-wrap">
+                    <div className="bubble">
+                      <span className="thinking-dots"><span /><span /><span /></span>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div ref={bottomRef} />
             </div>
 
@@ -679,7 +723,7 @@ export default function App() {
                 onMouseDown={!transcribing && !recording && whisperReady ? startRecording : undefined}
                 onMouseUp={recording ? () => stopRecording() : undefined}
                 onMouseLeave={recording ? () => stopRecording() : undefined}
-                onTouchStart={!transcribing && !recording && whisperReady ? startRecording : undefined}
+                onTouchStart={!transcribing && !recording && whisperReady ? (e: React.TouchEvent) => { e.preventDefault(); startRecording() } : undefined}
                 onTouchEnd={recording ? () => stopRecording() : undefined}
                 onClick={!whisperReady ? () => setSttError('Whisper not found. Install with: pip install openai-whisper  (requires ffmpeg too)') : undefined}
                 disabled={running || transcribing}
@@ -793,7 +837,7 @@ export default function App() {
 
       {/* ── Settings modal ── */}
       {showCfg && (
-        <div className="overlay" onClick={e => e.target === e.currentTarget && setShowCfg(false)}>
+        <div className="overlay">
           <div className="modal">
             <div className="modal-hd">
               <div className="modal-ico ico-cfg">⚙️</div>
@@ -1153,8 +1197,8 @@ export default function App() {
             )}
 
             <div className="modal-ft">
-              <button className="btn secondary" onClick={() => setShowCfg(false)}>Cancel</button>
-              <button className="btn primary" onClick={saveCfg}>Save</button>
+              <button className="btn secondary" onClick={() => setShowCfg(false)} disabled={savingCfg}>Cancel</button>
+              <button className="btn primary" onClick={saveCfg} disabled={savingCfg}>{savingCfg ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
         </div>

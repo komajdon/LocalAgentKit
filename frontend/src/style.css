@@ -1081,6 +1081,24 @@ body {
 }
 .update-dismiss:hover { color: var(--text); }
 
+/* ── Thinking indicator ───────────────────────────────────────────────── */
+.thinking-dots { display: inline-flex; gap: 4px; align-items: center; padding: 2px 0; }
+.thinking-dots span {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text2); display: inline-block;
+  animation: thinking-bounce 1.2s ease-in-out infinite;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes thinking-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%            { transform: translateY(-6px); opacity: 1; }
+}
+.conv-loading {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; opacity: 0.6;
+}
+
 /* ── Fatal error banner ────────────────────────────────────────────────── */
 .fatal-banner {
   position: fixed; top: 0; left: 0; right: 0; z-index: 9999;

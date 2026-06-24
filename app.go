@@ -347,6 +347,7 @@ func (a *App) SendMessage(text string) ChatResponse {
 		}
 		a.mu.Unlock()
 
+		runtime.EventsEmit(a.ctx, "chat:thinking", nil)
 		err := a.agent.Chat(ctx, text)
 
 		a.mu.Lock()
