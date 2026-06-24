@@ -78,10 +78,37 @@ func DataDir() string {
 		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 			exe = resolved
 		}
-		return filepath.Join(filepath.Dir(exe), "data")
+		// Portable layout: keep data next to the binary when that location is
+		// writable (zip/tar/AppImage installs). System packages put the binary
+		// in a read-only prefix like /usr/bin, so fall back to a per-user dir.
+		beside := filepath.Join(filepath.Dir(exe), "data")
+		if isWritable(beside) {
+			return beside
+		}
+	}
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, "ai-agent")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".ai-agent", "data")
+	if home != "" {
+		return filepath.Join(home, ".local", "share", "ai-agent")
+	}
+	return filepath.Join(os.TempDir(), "ai-agent")
+}
+
+// isWritable reports whether dir can be created and written to.
+func isWritable(dir string) bool {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false
+	}
+	probe := filepath.Join(dir, ".write-test")
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	_ = os.Remove(probe)
+	return true
 }
 
 // Put JSON-marshals v, encrypts it, and stores it at bucket/key.

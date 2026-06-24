@@ -1,8 +1,10 @@
 .PHONY: dev build build-linux build-windows build-mac-intel build-mac-arm \
         bundle-whisper whisper-bin-linux whisper-bin-mac whisper-bin-windows \
-        download-whisper-model clean
+        download-whisper-model package-deb package-rpm package-linux \
+        package-dmg package-windows clean
 
 BIN             := ai-agent
+VERSION         ?= 0.0.0-dev
 WHISPER_VERSION := 1.7.4
 WHISPER_MODEL   := base
 WHISPER_URL     := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$(WHISPER_MODEL).bin
@@ -83,7 +85,40 @@ download-whisper-model:
 	  echo "✓ Model already present"; \
 	fi
 
+# ── OS packages ───────────────────────────────────────────────────────────────
+# Produce native installers so non-technical users avoid Gatekeeper / SmartScreen
+# and get menu entries + icons. Run the matching build-* target first.
+
+# .deb + .rpm via nfpm (https://nfpm.goreleaser.com). Requires `nfpm` on PATH:
+#   go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+package-deb:
+	@command -v nfpm >/dev/null || { echo "nfpm not found: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest"; exit 1; }
+	@test -f build/bin/$(BIN)-linux-amd64 || { echo "missing build/bin/$(BIN)-linux-amd64 — run 'make build-linux'"; exit 1; }
+	@mkdir -p dist
+	VERSION=$(VERSION) nfpm package -f build/nfpm.yaml -p deb -t dist/
+	@echo "✓ .deb → dist/"
+
+package-rpm:
+	@command -v nfpm >/dev/null || { echo "nfpm not found: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest"; exit 1; }
+	@test -f build/bin/$(BIN)-linux-amd64 || { echo "missing build/bin/$(BIN)-linux-amd64 — run 'make build-linux'"; exit 1; }
+	@mkdir -p dist
+	VERSION=$(VERSION) nfpm package -f build/nfpm.yaml -p rpm -t dist/
+	@echo "✓ .rpm → dist/"
+
+package-linux: package-deb package-rpm
+
+# macOS .dmg from the built .app bundle (run on macOS after 'make build-mac-arm').
+# Set APPLE_DEVELOPER_ID / APPLE_NOTARY_PROFILE to sign + notarise.
+package-dmg:
+	@app=$$(find build/bin -maxdepth 1 -name '*.app' | head -1); \
+	  test -n "$$app" || { echo "no .app bundle in build/bin — run 'make build-mac-arm'"; exit 1; }; \
+	  build/darwin/make-dmg.sh "$$app" "dist/$(BIN)-$(VERSION).dmg"
+
+# Windows installer (NSIS) via Wails — produces build/bin/*-installer.exe.
+package-windows:
+	wails build -platform windows/amd64 -nsis -o $(BIN)-windows-amd64.exe -ldflags "-X main.Version=$(VERSION)"
+
 # ── Misc ─────────────────────────────────────────────────────────────────────
 
 clean:
-	rm -rf build/bin/
+	rm -rf build/bin/ dist/

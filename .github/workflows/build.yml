@@ -87,12 +87,12 @@ jobs:
       # ── macOS deps ────────────────────────────────────────────────────────────
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
-        run: brew install cmake ffmpeg
+        run: brew install cmake ffmpeg create-dmg
 
       # ── Windows deps ─────────────────────────────────────────────────────────
       - name: Install Windows dependencies
         if: runner.os == 'Windows'
-        run: choco install cmake ffmpeg --no-progress -y
+        run: choco install cmake ffmpeg nsis --no-progress -y
 
       # ── Whisper model (all platforms) ─────────────────────────────────────────
       - name: Cache whisper model
@@ -233,10 +233,22 @@ jobs:
           echo "Found bundle: $src"
           mv "$src" "build/bin/${{ matrix.bin_name }}"
 
+      - name: Build macOS DMG installer
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p dist
+          chmod +x build/darwin/make-dmg.sh
+          build/darwin/make-dmg.sh \
+            "build/bin/${{ matrix.bin_name }}" \
+            "dist/${{ matrix.artifact }}.dmg" \
+            "Personal AI Agent"
+          echo "DMG: $(du -sh dist/${{ matrix.artifact }}.dmg)"
+
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: wails build -platform ${{ matrix.platform }} -o ${{ matrix.artifact }} -ldflags "-X main.Version=${{ env.BUILD_VERSION }}"
+        run: wails build -platform ${{ matrix.platform }} -nsis -o ${{ matrix.artifact }} -ldflags "-X main.Version=${{ env.BUILD_VERSION }}"
 
       # ── Verify build output ───────────────────────────────────────────────────
       - name: Verify build output
@@ -318,6 +330,34 @@ jobs:
           path: ${{ matrix.artifact }}-lite.zip
           if-no-files-found: error
 
+      # ── OS installers ─────────────────────────────────────────────────────────
+      - name: Upload macOS DMG installer
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-dmg
+          path: dist/${{ matrix.artifact }}.dmg
+          if-no-files-found: error
+
+      - name: Stage Windows NSIS installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # project.nsi OutFile: build/bin/<wails-name>-amd64-installer.exe
+          src=$(find build/bin -maxdepth 1 -name '*-installer.exe' | head -1)
+          test -n "$src" || { echo "NSIS installer not found"; exit 1; }
+          mkdir -p dist
+          cp "$src" "dist/${{ matrix.artifact }}-installer.exe"
+          echo "Installer: $(du -sh dist/${{ matrix.artifact }}-installer.exe)"
+
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-installer
+          path: dist/${{ matrix.artifact }}-installer.exe
+          if-no-files-found: error
+
   # ── Flatpak (Linux only, tags + manual dispatch) ─────────────────────────────
   flatpak:
     name: Build Flatpak
@@ -378,12 +418,65 @@ jobs:
           path: ai-agent-linux-amd64.flatpak
           if-no-files-found: error
 
+  # ── Linux packages: .deb + .rpm (tags + manual dispatch) ─────────────────────
+  linux-packages:
+    name: Build .deb and .rpm
+    needs: build
+    runs-on: ubuntu-22.04
+    # never block the platform release on a packaging issue
+    continue-on-error: true
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      # The Linux full archive contains the binary + whisper + model under build/bin.
+      - name: Download Linux amd64 full artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-agent-linux-amd64-full
+          path: linux-artifact/
+
+      - name: Stage files for nfpm
+        run: |
+          mkdir -p build/bin
+          tar -xzf linux-artifact/ai-agent-linux-amd64-full.tar.gz -C linux-artifact/
+          cp linux-artifact/ai-agent-linux-amd64 build/bin/ai-agent-linux-amd64
+          cp linux-artifact/whisper              build/bin/whisper
+          chmod +x build/bin/ai-agent-linux-amd64 build/bin/whisper
+
+      - name: Resolve version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build .deb and .rpm
+        run: |
+          mkdir -p dist
+          nfpm package -f build/nfpm.yaml -p deb -t dist/
+          nfpm package -f build/nfpm.yaml -p rpm -t dist/
+          ls -lh dist/
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-agent-linux-packages
+          path: dist/*
+          if-no-files-found: error
+
   # ── Create GitHub Release (only on version tags) ─────────────────────────────
   release:
     name: Create Release
-    needs: [build, flatpak]
+    needs: [build, flatpak, linux-packages]
     runs-on: ubuntu-latest
-    # always() + build success check: release runs even if flatpak fails/skips
+    # always() + build success check: release runs even if flatpak/packages fail/skip
     if: startsWith(github.ref, 'refs/tags/v') && always() && needs.build.result == 'success'
     permissions:
       contents: write

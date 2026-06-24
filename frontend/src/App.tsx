@@ -52,6 +52,7 @@ interface Cfg {
   system_prompt: string
   context_limit: number
   mcp_servers: MCPServer[]
+  notifications: boolean
 }
 
 interface ContextUsage { used: number; limit: number }
@@ -139,6 +140,10 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<ConvMeta[] | null>(null)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // OS notifications — refs so the once-registered event listeners read live values
+  const notifyEnabledRef = useRef(true)
+  const sendStartRef     = useRef(0)
+
   // per-conversation model selector
   const [convModel, setConvModel] = useState('')
 
@@ -149,7 +154,7 @@ export default function App() {
     api_key: '', model: '', work_dir: '',
     tool_permissions: {}, whisper_model: 'base',
     system_prompt: '', context_limit: 8192,
-    mcp_servers: [],
+    mcp_servers: [], notifications: true,
   })
 
   // MCP UI state
@@ -195,7 +200,13 @@ export default function App() {
 
   // ── Boot ────────────────────────────────────────────────
 
+  // Keep the notification preference ref in sync with config.
+  useEffect(() => { notifyEnabledRef.current = cfg.notifications !== false }, [cfg.notifications])
+
   useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {})
+    }
     GetConfig().then(c => setCfg(c as any)).catch(() => {/* use defaults */})
     ListModels().then((r: any) => r.models && setModels(r.models)).catch(() => {})
     ListTools().then((t: any) => setToolList(t || [])).catch(() => {})
@@ -240,6 +251,10 @@ export default function App() {
           : it
       ))
       streamIdRef.current = null
+      if (sendStartRef.current && Date.now() - sendStartRef.current > 10_000) {
+        notify('Agent finished', 'The task completed and is ready for you.')
+      }
+      sendStartRef.current = 0
       refreshList()
     }))
 
@@ -257,7 +272,9 @@ export default function App() {
     offs.push(EventsOn('chat:error', (msg: string) => {
       setRunning(false); setThinking(false)
       streamIdRef.current = null
+      sendStartRef.current = 0
       setItems(prev => [...prev, { type: 'error', id: uid(), text: msg }])
+      notify('Agent error', msg)
     }))
 
     offs.push(EventsOn('chat:tool_call', (d: { tool: string; args: string }) => {
@@ -287,11 +304,17 @@ export default function App() {
       setItems(prev => [...prev, { type: 'tool', data: { id: resultId, kind: 'result', tool: d.tool, body: d.result } }])
     }))
 
-    offs.push(EventsOn('chat:permission_request', (req: PermReq) => setPermReq(req)))
+    offs.push(EventsOn('chat:permission_request', (req: PermReq) => {
+      setPermReq(req)
+      notify('Permission needed', `The agent wants to run "${req.tool}" — your approval is required.`)
+    }))
 
     offs.push(EventsOn('chat:context_usage', (u: ContextUsage) => setCtxUsage(u)))
 
-    offs.push(EventsOn('app:fatal', (msg: string) => setFatalError(msg)))
+    offs.push(EventsOn('app:fatal', (msg: string) => {
+      setFatalError(msg)
+      notify('Fatal error', msg)
+    }))
 
     offs.push(EventsOn('whisper:downloading', (model: string) => {
       setWhisperStatus(`Downloading whisper ${model} model…`)
@@ -378,6 +401,7 @@ export default function App() {
     if (!text || running || !activeId) return
     setItems(prev => [...prev, { type: 'msg', data: { id: uid(), role: 'user', text } }])
     setInput(''); setRunning(true); setThinking(true); streamIdRef.current = null
+    sendStartRef.current = Date.now()
     SendMessage(text)
   }, [input, running, activeId])
 
@@ -389,6 +413,20 @@ export default function App() {
     setInput(e.target.value)
     const t = e.target; t.style.height = 'auto'
     t.style.height = Math.min(t.scrollHeight, 160) + 'px'
+  }
+
+  // Fire an OS notification, but only when enabled, granted, and the window is
+  // not focused — there is no point alerting the user about what they can see.
+  const notify = (title: string, body: string) => {
+    if (!notifyEnabledRef.current) return
+    if (!('Notification' in window) || Notification.permission !== 'granted') return
+    if (document.hasFocus()) return
+    try {
+      const n = new Notification(title, { body, tag: 'ai-agent' })
+      n.onclick = () => { window.focus(); n.close() }
+    } catch {
+      // Some webviews reject the constructor — ignore.
+    }
   }
 
   const copyMessage = (id: number, text: string) => {
@@ -1103,6 +1141,18 @@ export default function App() {
                     onChange={e => setCfg(c => ({ ...c, context_limit: Number(e.target.value) }))}
                   />
                   <div className="field-hint">Approximate token limit before old messages are trimmed (default: 8192)</div>
+                </div>
+
+                <div className="field">
+                  <label className="mcp-toggle">
+                    <input
+                      type="checkbox"
+                      checked={cfg.notifications !== false}
+                      onChange={e => setCfg(c => ({ ...c, notifications: e.target.checked }))}
+                    />
+                    <span>Desktop notifications</span>
+                  </label>
+                  <div className="field-hint">Alert me when a long task finishes, a permission is needed, or an error occurs — only while the window is in the background.</div>
                 </div>
 
                 <div className="field">

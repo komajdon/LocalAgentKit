@@ -227,6 +227,8 @@ func findBinary() string {
 		filepath.Join(home, "go", "bin", "whisper"),
 		"/usr/local/bin/whisper",
 		"/opt/homebrew/bin/whisper",
+		"/usr/lib/ai-agent/whisper", // shipped by the .deb / .rpm package
+		"/usr/libexec/ai-agent/whisper",
 	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {

@@ -1,0 +1,49 @@
+# nfpm configuration — builds .deb and .rpm from the same manifest.
+#   nfpm package -f build/nfpm.yaml -p deb -t dist/
+#   nfpm package -f build/nfpm.yaml -p rpm -t dist/
+#
+# Expects these files to exist before running (staged by the Makefile / CI):
+#   build/bin/ai-agent-linux-amd64          the Wails binary
+#   build/bin/whisper                       the bundled whisper.cpp binary
+#   build/linux/com.bluewhale.AIAgent.desktop
+#   build/appicon.png
+#
+# VERSION is taken from the env var of the same name (default 0.0.0-dev).
+name: ai-agent
+arch: amd64
+platform: linux
+version: ${VERSION}
+version_schema: none
+section: utils
+priority: optional
+maintainer: blue whale <bluewhale.f@gmail.com>
+description: |
+  Personal AI Agent — a desktop app that wraps a conversational AI agent
+  powered by local Ollama or any OpenAI-compatible backend, with filesystem
+  and shell tools, MCP servers, encrypted history, and voice input.
+vendor: blue whale
+homepage: https://github.com/bluewhale/agent-gui
+license: MIT
+
+# ffmpeg is needed for speech-to-text; recommended, not hard-required.
+recommends:
+  - ffmpeg
+
+contents:
+  - src: ./build/bin/ai-agent-linux-amd64
+    dst: /usr/bin/ai-agent
+    file_info:
+      mode: 0755
+
+  - src: ./build/bin/whisper
+    dst: /usr/lib/ai-agent/whisper
+    file_info:
+      mode: 0755
+
+  - src: ./build/linux/com.bluewhale.AIAgent.desktop
+    dst: /usr/share/applications/com.bluewhale.AIAgent.desktop
+
+  # /usr/share/pixmaps is the size-agnostic icon fallback — avoids claiming a
+  # specific hicolor size for the 1024x1024 source PNG.
+  - src: ./build/appicon.png
+    dst: /usr/share/pixmaps/com.bluewhale.AIAgent.png

@@ -57,6 +57,7 @@ type Config struct {
 	SystemPrompt    string              `json:"system_prompt"`
 	ContextLimit    int                 `json:"context_limit"`
 	MCPServers      []MCPServerConfig   `json:"mcp_servers"`
+	Notifications   bool                `json:"notifications"`
 }
 
 func Default() Config {
@@ -68,6 +69,7 @@ func Default() Config {
 		ContextLimit:    8192,
 		ToolPermissions: map[string]ToolPerm{},
 		MCPServers:      []MCPServerConfig{},
+		Notifications:   true,
 	}
 }
 
