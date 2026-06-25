@@ -92,7 +92,12 @@ jobs:
       # ── Windows deps ─────────────────────────────────────────────────────────
       - name: Install Windows dependencies
         if: runner.os == 'Windows'
-        run: choco install cmake ffmpeg nsis --no-progress -y
+        shell: bash
+        run: |
+          choco install cmake ffmpeg nsis --no-progress -y
+          # The nsis choco package does not add makensis to PATH; do it ourselves
+          # so `wails build -nsis` can find it in later steps.
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
 
       # ── Whisper model (all platforms) ─────────────────────────────────────────
       - name: Cache whisper model
@@ -235,6 +240,8 @@ jobs:
 
       - name: Build macOS DMG installer
         if: runner.os == 'macOS'
+        # Packaging must never fail the build and block the platform release.
+        continue-on-error: true
         shell: bash
         run: |
           mkdir -p dist
@@ -333,30 +340,37 @@ jobs:
       # ── OS installers ─────────────────────────────────────────────────────────
       - name: Upload macOS DMG installer
         if: runner.os == 'macOS'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}-dmg
           path: dist/${{ matrix.artifact }}.dmg
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Stage Windows NSIS installer
         if: runner.os == 'Windows'
+        # Non-fatal: a missing installer must not block the platform release.
+        continue-on-error: true
         shell: bash
         run: |
           # project.nsi OutFile: build/bin/<wails-name>-amd64-installer.exe
           src=$(find build/bin -maxdepth 1 -name '*-installer.exe' | head -1)
-          test -n "$src" || { echo "NSIS installer not found"; exit 1; }
+          if [ -z "$src" ]; then
+            echo "::warning::NSIS installer not produced (makensis missing?) — skipping"
+            exit 0
+          fi
           mkdir -p dist
           cp "$src" "dist/${{ matrix.artifact }}-installer.exe"
           echo "Installer: $(du -sh dist/${{ matrix.artifact }}-installer.exe)"
 
       - name: Upload Windows installer
         if: runner.os == 'Windows'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}-installer
           path: dist/${{ matrix.artifact }}-installer.exe
-          if-no-files-found: error
+          if-no-files-found: warn
 
   # ── Flatpak (Linux only, tags + manual dispatch) ─────────────────────────────
   flatpak:

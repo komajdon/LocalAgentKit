@@ -50,6 +50,7 @@ export namespace config {
 	    system_prompt: string;
 	    context_limit: number;
 	    mcp_servers: MCPServerConfig[];
+	    notifications: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -67,6 +68,7 @@ export namespace config {
 	        this.system_prompt = source["system_prompt"];
 	        this.context_limit = source["context_limit"];
 	        this.mcp_servers = this.convertValues(source["mcp_servers"], MCPServerConfig);
+	        this.notifications = source["notifications"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
