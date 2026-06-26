@@ -29,6 +29,10 @@ type mcpClient struct {
 	pending map[int64]chan jsonRPCResponse
 	nextID  atomic.Int64
 	done    chan struct{} // closed when readLoop exits
+
+	// writeMu serialises writes to stdin so concurrent tool calls (parallel
+	// tool execution) cannot interleave bytes of different JSON-RPC frames.
+	writeMu sync.Mutex
 }
 
 type jsonRPCRequest struct {
@@ -181,11 +185,14 @@ func (c *mcpClient) call(params any) (json.RawMessage, error) {
 	}
 	data = append(data, '\n')
 
-	if _, err := c.stdin.Write(data); err != nil {
+	c.writeMu.Lock()
+	_, werr := c.stdin.Write(data)
+	c.writeMu.Unlock()
+	if werr != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return nil, err
+		return nil, werr
 	}
 
 	select {
@@ -227,11 +234,14 @@ func (c *mcpClient) callMethod(method string, params any) (json.RawMessage, erro
 	}
 	data = append(data, '\n')
 
-	if _, err := c.stdin.Write(data); err != nil {
+	c.writeMu.Lock()
+	_, werr := c.stdin.Write(data)
+	c.writeMu.Unlock()
+	if werr != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return nil, err
+		return nil, werr
 	}
 
 	select {
@@ -255,7 +265,9 @@ func (c *mcpClient) notify(method string, params any) error {
 		return err
 	}
 	data = append(data, '\n')
+	c.writeMu.Lock()
 	_, err = c.stdin.Write(data)
+	c.writeMu.Unlock()
 	return err
 }
 
@@ -470,11 +482,14 @@ func (c *mcpClient) contextCallMethod(ctx context.Context, method string, params
 	}
 	data = append(data, '\n')
 
-	if _, err := c.stdin.Write(data); err != nil {
+	c.writeMu.Lock()
+	_, werr := c.stdin.Write(data)
+	c.writeMu.Unlock()
+	if werr != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return nil, err
+		return nil, werr
 	}
 
 	select {

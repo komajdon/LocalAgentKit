@@ -58,6 +58,9 @@ type Config struct {
 	ContextLimit    int                 `json:"context_limit"`
 	MCPServers      []MCPServerConfig   `json:"mcp_servers"`
 	Notifications   bool                `json:"notifications"`
+	// Web search tool configuration.
+	SearchProvider string `json:"search_provider"` // duckduckgo (default, no key) | brave | serpapi
+	SearchAPIKey   string `json:"search_api_key"`
 }
 
 func Default() Config {
@@ -70,6 +73,7 @@ func Default() Config {
 		ToolPermissions: map[string]ToolPerm{},
 		MCPServers:      []MCPServerConfig{},
 		Notifications:   true,
+		SearchProvider:  "duckduckgo",
 	}
 }
 
@@ -86,6 +90,9 @@ func Load() Config {
 	}
 	if cfg.MCPServers == nil {
 		cfg.MCPServers = []MCPServerConfig{}
+	}
+	if cfg.SearchProvider == "" {
+		cfg.SearchProvider = "duckduckgo"
 	}
 	return cfg
 }

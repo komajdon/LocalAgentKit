@@ -5,6 +5,7 @@ go 1.22.0
 toolchain go1.22.2
 
 require (
+	github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80
 	github.com/wailsapp/wails/v2 v2.12.0
 	go.etcd.io/bbolt v1.3.11
 )

@@ -82,7 +82,10 @@ func (a *App) newProvider() domain.LLMProvider {
 func (a *App) buildAgent(workDir string) *appLayer.ConversationalAgent {
 	provider := a.newProvider()
 
-	registry := tools.DefaultRegistryWithMCP(workDir, a.cfg.MCPServers)
+	registry := tools.DefaultRegistryFull(workDir, a.cfg.MCPServers, tools.SearchConfig{
+		Provider: a.cfg.SearchProvider,
+		APIKey:   a.cfg.SearchAPIKey,
+	})
 	agent := appLayer.NewConversationalAgent(a.cfg.Model, provider, registry, a.cfg.SystemPrompt, a.cfg.ContextLimit)
 
 	agent.OnChunk = func(chunk string) {
@@ -671,13 +674,19 @@ func (a *App) GetConfig() config.Config {
 	if len(safe.APIKey) > 4 {
 		safe.APIKey = "***" + safe.APIKey[len(safe.APIKey)-4:]
 	}
+	if len(safe.SearchAPIKey) > 4 {
+		safe.SearchAPIKey = "***" + safe.SearchAPIKey[len(safe.SearchAPIKey)-4:]
+	}
 	return safe
 }
 
 func (a *App) SaveConfig(cfg config.Config) string {
-	// If the key was returned masked (starts with ***), keep the real stored key.
+	// If a key was returned masked (starts with ***), keep the real stored key.
 	if strings.HasPrefix(cfg.APIKey, "***") {
 		cfg.APIKey = a.cfg.APIKey
+	}
+	if strings.HasPrefix(cfg.SearchAPIKey, "***") {
+		cfg.SearchAPIKey = a.cfg.SearchAPIKey
 	}
 	a.cfg = cfg
 	if err := config.Save(cfg); err != nil {

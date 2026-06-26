@@ -53,6 +53,8 @@ interface Cfg {
   context_limit: number
   mcp_servers: MCPServer[]
   notifications: boolean
+  search_provider: string
+  search_api_key: string
 }
 
 interface ContextUsage { used: number; limit: number }
@@ -155,6 +157,7 @@ export default function App() {
     tool_permissions: {}, whisper_model: 'base',
     system_prompt: '', context_limit: 8192,
     mcp_servers: [], notifications: true,
+    search_provider: 'duckduckgo', search_api_key: '',
   })
 
   // MCP UI state
@@ -1154,6 +1157,31 @@ export default function App() {
                   </label>
                   <div className="field-hint">Alert me when a long task finishes, a permission is needed, or an error occurs — only while the window is in the background.</div>
                 </div>
+
+                <div className="field">
+                  <label>Web Search Provider</label>
+                  <select
+                    value={cfg.search_provider || 'duckduckgo'}
+                    onChange={e => setCfg(c => ({ ...c, search_provider: e.target.value }))}
+                  >
+                    <option value="duckduckgo">DuckDuckGo — no API key required</option>
+                    <option value="brave">Brave Search — requires API key</option>
+                    <option value="serpapi">SerpAPI (Google) — requires API key</option>
+                  </select>
+                  <div className="field-hint">Powers the <code>search_web</code> tool. DuckDuckGo works out of the box; Brave/SerpAPI return higher-quality results with an API key.</div>
+                </div>
+
+                {(cfg.search_provider === 'brave' || cfg.search_provider === 'serpapi') && (
+                  <div className="field">
+                    <label>{cfg.search_provider === 'brave' ? 'Brave Search' : 'SerpAPI'} API Key</label>
+                    <input
+                      type="password"
+                      value={cfg.search_api_key || ''}
+                      onChange={e => setCfg(c => ({ ...c, search_api_key: e.target.value }))}
+                      placeholder={cfg.search_provider === 'brave' ? 'BSA…' : 'serpapi key'}
+                    />
+                  </div>
+                )}
 
                 <div className="field">
                   <label>System Prompt (optional prefix)</label>
