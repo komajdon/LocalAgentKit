@@ -4,9 +4,19 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"agent-gui/domain"
 )
+
+// pendingCall is one tool invocation parsed from an LLM response. Entries with
+// execute=true are run concurrently; the rest carry a pre-filled result.
+type pendingCall struct {
+	tc      *domain.ToolCall
+	tool    domain.Tool
+	result  string
+	execute bool
+}
 
 // PermissionRequest is sent to the UI before any tool execution.
 type PermissionRequest struct {
@@ -113,7 +123,9 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 		a.conv.Add(domain.Message{Role: domain.RoleAssistant, Content: response})
 		a.emitContextUsage()
 
-		toolCalled := false
+		// Collect every tool call in this response. Permission prompts happen
+		// here, sequentially, so the UI only ever shows one dialog at a time.
+		var pending []*pendingCall
 		for _, line := range strings.Split(response, "\n") {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -123,15 +135,10 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			if !ok {
 				continue
 			}
-			toolCalled = true
 
 			tool, found := a.registry.Find(tc.Tool)
 			if !found {
-				result := "ERROR: unknown tool '" + tc.Tool + "'"
-				a.conv.Add(domain.Message{Role: domain.RoleUser, Content: "TOOL_RESULT: " + result})
-				if a.OnToolResult != nil {
-					a.OnToolResult(tc.Tool, result)
-				}
+				pending = append(pending, &pendingCall{tc: tc, result: "ERROR: unknown tool '" + tc.Tool + "'"})
 				continue
 			}
 
@@ -142,11 +149,7 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 					Args:        tc.Args,
 				})
 				if !allowed {
-					result := "PERMISSION DENIED by user"
-					a.conv.Add(domain.Message{Role: domain.RoleUser, Content: "TOOL_RESULT for " + tc.Tool + ":\n" + result})
-					if a.OnToolResult != nil {
-						a.OnToolResult(tc.Tool, result)
-					}
+					pending = append(pending, &pendingCall{tc: tc, result: "PERMISSION DENIED by user"})
 					continue
 				}
 			}
@@ -154,15 +157,35 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			if a.OnToolCall != nil {
 				a.OnToolCall(tc.Tool, tc.Args)
 			}
-			result := tool.Execute(tc.Args)
-			if a.OnToolResult != nil {
-				a.OnToolResult(tc.Tool, result)
-			}
-			a.conv.Add(domain.Message{Role: domain.RoleUser, Content: "TOOL_RESULT for " + tc.Tool + ":\n" + result})
+			pending = append(pending, &pendingCall{tc: tc, tool: tool, execute: true})
 		}
 
-		if !toolCalled {
+		if len(pending) == 0 {
 			return nil
+		}
+
+		// Execute all approved tool calls concurrently, then collect their
+		// results. Pre-filled entries (unknown tool / denied) are left as-is.
+		var wg sync.WaitGroup
+		for _, p := range pending {
+			if !p.execute {
+				continue
+			}
+			wg.Add(1)
+			go func(p *pendingCall) {
+				defer wg.Done()
+				p.result = p.tool.Execute(p.tc.Args)
+			}(p)
+		}
+		wg.Wait()
+
+		// Emit results and append to history in the original call order so the
+		// conversation stays deterministic regardless of completion order.
+		for _, p := range pending {
+			if a.OnToolResult != nil {
+				a.OnToolResult(p.tc.Tool, p.result)
+			}
+			a.conv.Add(domain.Message{Role: domain.RoleUser, Content: "TOOL_RESULT for " + p.tc.Tool + ":\n" + p.result})
 		}
 	}
 	return fmt.Errorf("agent exceeded maximum tool iterations (%d) — stopping to prevent a runaway loop", maxToolIterations)
@@ -211,7 +234,10 @@ To use a tool, output a JSON block on its own line:
 
 TOOL_CALL: {"tool": "<tool_name>", "args": {<key>: <value>, ...}}
 
-Wait for the TOOL_RESULT before continuing. Call tools one at a time.
+You may issue several TOOL_CALL lines in the SAME response to run independent
+tools in parallel — all of their TOOL_RESULT outputs come back together. When a
+step depends on a previous tool's result, call that tool first and wait for its
+TOOL_RESULT before continuing.
 After gathering all information, give your final answer.
 
 IMPORTANT TOOL PRIORITY RULE:
