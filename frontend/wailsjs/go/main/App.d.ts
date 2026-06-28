@@ -17,6 +17,8 @@ export function GetConfig():Promise<config.Config>;
 
 export function GetContextUsage():Promise<app.ContextUsage>;
 
+export function GetUsageBudget():Promise<main.UsageBudget>;
+
 export function GetVersion():Promise<string>;
 
 export function ImportBackup():Promise<string>;
@@ -51,6 +53,10 @@ export function SendMessage(arg1:string):Promise<main.ChatResponse>;
 
 export function SetConversationModel(arg1:string):Promise<void>;
 
+export function SetConversationPinned(arg1:string,arg2:boolean):Promise<void>;
+
+export function SetConversationTags(arg1:string,arg2:Array<string>):Promise<void>;
+
 export function StartRecording():Promise<void>;
 
 export function StopAgent():Promise<void>;
@@ -58,6 +64,8 @@ export function StopAgent():Promise<void>;
 export function StopRecording():Promise<string>;
 
 export function TranscribeAudio(arg1:Array<number>):Promise<string>;
+
+export function TruncateAndResend(arg1:number,arg2:string):Promise<main.ChatResponse>;
 
 export function UpdateConversationPath(arg1:string):Promise<void>;
 

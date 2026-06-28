@@ -6,10 +6,12 @@ import {
   ListConversations, NewConversation, LoadConversation,
   DeleteConversation, UpdateConversationPath, RenameConversation,
   SearchConversations, ExportConversation, SetConversationModel,
+  TruncateAndResend, SetConversationPinned, SetConversationTags,
   ListModels, ListTools, GetConfig, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, SaveMCPServers, ProbeMCPServer,
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup,
+  GetUsageBudget,
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -17,6 +19,7 @@ import { EventsOn } from '../wailsjs/runtime/runtime'
 
 interface ConvMeta {
   id: string; title: string; work_dir: string; model?: string
+  pinned?: boolean; tags?: string[]
   created_at: string; updated_at: string
 }
 interface SavedConv extends ConvMeta {
@@ -55,9 +58,18 @@ interface Cfg {
   notifications: boolean
   search_provider: string
   search_api_key: string
+  theme: string
+  budget_data_gb: number
+  budget_fund: number
+  fund_per_mtokens: number
 }
 
-interface ContextUsage { used: number; limit: number }
+interface ContextUsage { used: number; limit: number; total?: number; estimated?: boolean }
+interface UsageBudget {
+  tokens: number
+  data_total_gb: number; data_remain_gb: number
+  fund_total: number; fund_remain: number; fund_unit: string
+}
 interface UpdateInfo { available: boolean; current: string; latest: string; url: string }
 
 let seq = 0
@@ -79,15 +91,17 @@ function shortPath(p: string) {
 }
 
 function groupConvs(list: ConvMeta[]) {
+  const pinned: ConvMeta[] = []
   const today: ConvMeta[] = [], week: ConvMeta[] = [], older: ConvMeta[] = []
   const now = Date.now()
   list.forEach(c => {
+    if (c.pinned) { pinned.push(c); return }
     const age = now - new Date(c.updated_at).getTime()
     if (age < 86400_000) today.push(c)
     else if (age < 604800_000) week.push(c)
     else older.push(c)
   })
-  return { today, week, older }
+  return { pinned, today, week, older }
 }
 
 
@@ -120,6 +134,18 @@ export default function App() {
 
   // copy feedback
   const [copiedId, setCopiedId] = useState<number | null>(null)
+
+  // message editing (edit & resend)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editValue, setEditValue] = useState('')
+
+  // tag filter + inline tag editor
+  const [tagFilter, setTagFilter]       = useState<string | null>(null)
+  const [tagEditId, setTagEditId]       = useState<string | null>(null)
+  const [tagEditValue, setTagEditValue] = useState('')
+
+  // shared usage budget (data + fund pool)
+  const [budget, setBudget] = useState<UsageBudget | null>(null)
 
   // speech-to-text
   const [whisperReady, setWhisperReady]       = useState(false)
@@ -158,6 +184,8 @@ export default function App() {
     system_prompt: '', context_limit: 8192,
     mcp_servers: [], notifications: true,
     search_provider: 'duckduckgo', search_api_key: '',
+    theme: 'dark',
+    budget_data_gb: 50, budget_fund: 50, fund_per_mtokens: 1,
   })
 
   // MCP UI state
@@ -206,6 +234,23 @@ export default function App() {
   // Keep the notification preference ref in sync with config.
   useEffect(() => { notifyEnabledRef.current = cfg.notifications !== false }, [cfg.notifications])
 
+  // Apply the colour theme. "system" follows the OS and updates live.
+  useEffect(() => {
+    const root = document.documentElement
+    const apply = (light: boolean) => {
+      if (light) root.setAttribute('data-theme', 'light')
+      else root.removeAttribute('data-theme')
+    }
+    if (cfg.theme === 'light') { apply(true); return }
+    if (cfg.theme === 'dark' || !cfg.theme) { apply(false); return }
+    // system
+    const mq = window.matchMedia('(prefers-color-scheme: light)')
+    apply(mq.matches)
+    const onChange = (e: MediaQueryListEvent) => apply(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [cfg.theme])
+
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {})
@@ -217,6 +262,7 @@ export default function App() {
     ListMCPServers().then((s: any) => setMcpServers(s || [])).catch(() => {})
     GetVersion().then(v => setAppVersion(v)).catch(() => {})
     CheckForUpdate().then((info: any) => { if (info?.available) setUpdateInfo(info) }).catch(() => {})
+    GetUsageBudget().then((b: any) => setBudget(b)).catch(() => {})
     refreshList()
   }, [])
 
@@ -314,6 +360,8 @@ export default function App() {
 
     offs.push(EventsOn('chat:context_usage', (u: ContextUsage) => setCtxUsage(u)))
 
+    offs.push(EventsOn('chat:usage_budget', (b: UsageBudget) => setBudget(b)))
+
     offs.push(EventsOn('app:fatal', (msg: string) => {
       setFatalError(msg)
       notify('Fatal error', msg)
@@ -377,6 +425,26 @@ export default function App() {
     refreshList()
   }
 
+  const togglePin = async (e: React.MouseEvent, c: ConvMeta) => {
+    e.stopPropagation()
+    await SetConversationPinned(c.id, !c.pinned)
+    refreshList()
+  }
+
+  const startTagEdit = (e: React.MouseEvent, c: ConvMeta) => {
+    e.stopPropagation()
+    setTagEditId(c.id)
+    setTagEditValue((c.tags || []).join(', '))
+  }
+
+  const commitTagEdit = async () => {
+    if (!tagEditId) return
+    const tags = tagEditValue.split(',').map(t => t.trim()).filter(Boolean)
+    await SetConversationTags(tagEditId, tags)
+    setTagEditId(null); setTagEditValue('')
+    refreshList()
+  }
+
   const startRename = (e: React.MouseEvent, c: ConvMeta) => {
     e.stopPropagation()
     setRenamingId(c.id)
@@ -410,6 +478,31 @@ export default function App() {
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+  }
+
+  const startEdit = (id: number, text: string) => {
+    if (running) return
+    setEditingId(id); setEditValue(text)
+  }
+
+  // Resubmit an edited user message: truncate the transcript to that point,
+  // replace the message, and re-run the agent from there.
+  const commitEdit = (id: number) => {
+    const text = editValue.trim()
+    if (!text || running) { setEditingId(null); return }
+    const idx = items.findIndex(it => it.type === 'msg' && it.data.id === id)
+    if (idx < 0) { setEditingId(null); return }
+    // userOrdinal = how many user messages precede this one in the transcript.
+    let userOrdinal = 0
+    for (let i = 0; i < idx; i++) {
+      const it = items[i]
+      if (it.type === 'msg' && it.data.role === 'user') userOrdinal++
+    }
+    setItems(prev => [...prev.slice(0, idx), { type: 'msg', data: { id: uid(), role: 'user', text } }])
+    setEditingId(null); setEditValue('')
+    setRunning(true); setThinking(true); streamIdRef.current = null
+    sendStartRef.current = Date.now()
+    TruncateAndResend(userOrdinal, text)
   }
 
   const autoResize = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -514,7 +607,9 @@ export default function App() {
 
   // ── Render ───────────────────────────────────────────────
 
-  const groups = groupConvs(convList)
+  const allTags = Array.from(new Set(convList.flatMap(c => c.tags || []))).sort()
+  const visibleConvs = tagFilter ? convList.filter(c => (c.tags || []).includes(tagFilter)) : convList
+  const groups = groupConvs(visibleConvs)
 
   const ConvGroup = ({ label, list }: { label: string; list: ConvMeta[] }) =>
     list.length === 0 ? null : (
@@ -540,7 +635,30 @@ export default function App() {
                 />
               ) : (
                 <div className="conv-name" onDoubleClick={e => startRename(e, c)} title="Double-click to rename">
-                  {c.title}
+                  {c.pinned && <span className="conv-pin-mark">📌</span>}{c.title}
+                </div>
+              )}
+              {tagEditId === c.id ? (
+                <input
+                  className="conv-rename-input"
+                  autoFocus
+                  value={tagEditValue}
+                  placeholder="tag1, tag2…"
+                  onChange={e => setTagEditValue(e.target.value)}
+                  onBlur={commitTagEdit}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitTagEdit()
+                    if (e.key === 'Escape') { setTagEditId(null); setTagEditValue('') }
+                    e.stopPropagation()
+                  }}
+                  onClick={e => e.stopPropagation()}
+                />
+              ) : (c.tags && c.tags.length > 0) && (
+                <div className="conv-tags">
+                  {c.tags.map(t => (
+                    <span key={t} className={`conv-tag ${tagFilter === t ? 'active' : ''}`}
+                      onClick={e => { e.stopPropagation(); setTagFilter(tagFilter === t ? null : t) }}>{t}</span>
+                  ))}
                 </div>
               )}
               <div className="conv-info">
@@ -548,7 +666,11 @@ export default function App() {
                 <span style={{ marginLeft: 'auto' }}>{timeAgo(c.updated_at)}</span>
               </div>
             </div>
-            <button className="conv-del" onClick={e => delConv(e, c.id)} title="Delete">✕</button>
+            <div className="conv-row-actions">
+              <button className="conv-act" onClick={e => togglePin(e, c)} title={c.pinned ? 'Unpin' : 'Pin'}>{c.pinned ? '📍' : '📌'}</button>
+              <button className="conv-act" onClick={e => startTagEdit(e, c)} title="Edit tags">🏷</button>
+              <button className="conv-del" onClick={e => delConv(e, c.id)} title="Delete">✕</button>
+            </div>
           </div>
         ))}
       </div>
@@ -595,6 +717,16 @@ export default function App() {
           {searchQuery && <button className="search-clear" onClick={() => runSearch('')}>✕</button>}
         </div>
 
+        {allTags.length > 0 && searchResults === null && (
+          <div className="tag-filter-bar">
+            {allTags.map(t => (
+              <span key={t} className={`conv-tag ${tagFilter === t ? 'active' : ''}`}
+                onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</span>
+            ))}
+            {tagFilter && <span className="tag-filter-clear" onClick={() => setTagFilter(null)}>clear ✕</span>}
+          </div>
+        )}
+
         <div className="conv-list">
           {searchResults !== null ? (
             searchResults.length === 0
@@ -603,6 +735,7 @@ export default function App() {
           ) : convList.length === 0
             ? <div className="conv-empty">No conversations yet.<br />Click "+ New conversation" to start.</div>
             : <>
+                <ConvGroup label="📌 Pinned" list={groups.pinned} />
                 <ConvGroup label="Today" list={groups.today} />
                 <ConvGroup label="This week" list={groups.week} />
                 <ConvGroup label="Older" list={groups.older} />
@@ -662,10 +795,20 @@ export default function App() {
               {ctxUsage && (() => {
                 const pct = Math.min(100, Math.round(ctxUsage.used / ctxUsage.limit * 100))
                 const warn = pct >= 80
+                const prefix = ctxUsage.estimated ? '~' : ''
+                const totalStr = ctxUsage.total ? ` · ${ctxUsage.total.toLocaleString()} tokens used this conversation` : ''
+                const budgetStr = budget
+                  ? `\n\nShared budget (account-wide):`
+                    + `\n• Data: ${budget.data_remain_gb.toFixed(2)} / ${budget.data_total_gb} GB remaining`
+                    + `\n• Fund: ${budget.fund_remain.toFixed(2)} / ${budget.fund_total} ${budget.fund_unit} remaining`
+                    + `\n• ${budget.tokens.toLocaleString()} tokens used total`
+                  : ''
+                const title = `Context: ${prefix}${ctxUsage.used.toLocaleString()} / ${ctxUsage.limit.toLocaleString()} tokens`
+                  + (ctxUsage.estimated ? ' (estimated)' : ' (actual)') + totalStr + budgetStr
                 return (
-                  <div className={`ctx-bar ${warn ? 'warn' : ''}`} title={`Context: ~${ctxUsage.used} / ${ctxUsage.limit} tokens`}>
+                  <div className={`ctx-bar ${warn ? 'warn' : ''}`} title={title}>
                     <div className="ctx-fill" style={{ width: pct + '%' }} />
-                    <span className="ctx-label">{pct}%</span>
+                    <span className="ctx-label">{prefix}{pct}%</span>
                   </div>
                 )
               })()}
@@ -710,24 +853,52 @@ export default function App() {
                   )
                 }
                 const m = item.data
+                const editing = editingId === m.id
                 return (
                   <div key={m.id} className={`msg-row ${m.role}`}>
                     <div className={`av ${m.role}`}>{m.role === 'user' ? 'U' : '🤖'}</div>
                     <div className="bubble-wrap">
                       <div className="bubble">
-                        {m.role === 'assistant' && !m.streaming
+                        {editing ? (
+                          <div className="msg-edit">
+                            <textarea
+                              autoFocus
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitEdit(m.id) }
+                                if (e.key === 'Escape') { setEditingId(null); setEditValue('') }
+                              }}
+                              rows={Math.min(8, editValue.split('\n').length + 1)}
+                            />
+                            <div className="msg-edit-actions">
+                              <button className="btn secondary" onClick={() => { setEditingId(null); setEditValue('') }}>Cancel</button>
+                              <button className="btn primary" onClick={() => commitEdit(m.id)} disabled={!editValue.trim()}>Save &amp; resend</button>
+                            </div>
+                          </div>
+                        ) : m.role === 'assistant' && !m.streaming
                           ? <Markdown text={m.text} />
                           : <span>{m.text}{m.streaming && <span className="cursor" />}</span>
                         }
                       </div>
-                      {!m.streaming && (
-                        <button
-                          className={`copy-btn ${copiedId === m.id ? 'copied' : ''}`}
-                          onClick={() => copyMessage(m.id, m.text)}
-                          title="Copy to clipboard"
-                        >
-                          {copiedId === m.id ? '✓' : '⧉'}
-                        </button>
+                      {!m.streaming && !editing && (
+                        <div className="msg-actions">
+                          {m.role === 'user' && (
+                            <button
+                              className="copy-btn"
+                              onClick={() => startEdit(m.id, m.text)}
+                              disabled={running}
+                              title="Edit & resend"
+                            >✎</button>
+                          )}
+                          <button
+                            className={`copy-btn ${copiedId === m.id ? 'copied' : ''}`}
+                            onClick={() => copyMessage(m.id, m.text)}
+                            title="Copy to clipboard"
+                          >
+                            {copiedId === m.id ? '✓' : '⧉'}
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1156,6 +1327,44 @@ export default function App() {
                     <span>Desktop notifications</span>
                   </label>
                   <div className="field-hint">Alert me when a long task finishes, a permission is needed, or an error occurs — only while the window is in the background.</div>
+                </div>
+
+                <div className="field">
+                  <label>Theme</label>
+                  <select
+                    value={cfg.theme || 'dark'}
+                    onChange={e => setCfg(c => ({ ...c, theme: e.target.value }))}
+                  >
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                    <option value="system">Follow OS</option>
+                  </select>
+                  <div className="field-hint">Applies immediately. "Follow OS" tracks your system's light/dark preference.</div>
+                </div>
+
+                <div className="field">
+                  <label>Shared Usage Budget</label>
+                  <div className="budget-grid">
+                    <div>
+                      <span className="budget-sub">Data (GB)</span>
+                      <input type="number" min={0} step={1}
+                        value={cfg.budget_data_gb ?? 50}
+                        onChange={e => setCfg(c => ({ ...c, budget_data_gb: Number(e.target.value) }))} />
+                    </div>
+                    <div>
+                      <span className="budget-sub">Fund (STRRIAL)</span>
+                      <input type="number" min={0} step={1}
+                        value={cfg.budget_fund ?? 50}
+                        onChange={e => setCfg(c => ({ ...c, budget_fund: Number(e.target.value) }))} />
+                    </div>
+                    <div>
+                      <span className="budget-sub">STRRIAL / 1M tokens</span>
+                      <input type="number" min={0} step={0.1}
+                        value={cfg.fund_per_mtokens ?? 1}
+                        onChange={e => setCfg(c => ({ ...c, fund_per_mtokens: Number(e.target.value) }))} />
+                    </div>
+                  </div>
+                  <div className="field-hint">A single account-wide pool consumed by token usage across all conversations. Remaining data/fund is shown in the context-bar tooltip.</div>
                 </div>
 
                 <div className="field">

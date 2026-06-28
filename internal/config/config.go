@@ -61,6 +61,13 @@ type Config struct {
 	// Web search tool configuration.
 	SearchProvider string `json:"search_provider"` // duckduckgo (default, no key) | brave | serpapi
 	SearchAPIKey   string `json:"search_api_key"`
+	// UI theme: dark (default) | light | system (follow OS).
+	Theme string `json:"theme"`
+	// Shared usage budget — a single account-wide pool consumed by token usage
+	// across all conversations. Shown as total vs remaining in the context bar.
+	BudgetDataGB   float64 `json:"budget_data_gb"`   // total data allowance (GB)
+	BudgetFund     float64 `json:"budget_fund"`      // total fund allowance (STRRIAL)
+	FundPerMTokens float64 `json:"fund_per_mtokens"` // STRRIAL charged per 1M tokens
 }
 
 func Default() Config {
@@ -74,6 +81,10 @@ func Default() Config {
 		MCPServers:      []MCPServerConfig{},
 		Notifications:   true,
 		SearchProvider:  "duckduckgo",
+		Theme:           "dark",
+		BudgetDataGB:    50,
+		BudgetFund:      50,
+		FundPerMTokens:  1,
 	}
 }
 
@@ -93,6 +104,18 @@ func Load() Config {
 	}
 	if cfg.SearchProvider == "" {
 		cfg.SearchProvider = "duckduckgo"
+	}
+	if cfg.Theme == "" {
+		cfg.Theme = "dark"
+	}
+	if cfg.BudgetDataGB == 0 {
+		cfg.BudgetDataGB = 50
+	}
+	if cfg.BudgetFund == 0 {
+		cfg.BudgetFund = 50
+	}
+	if cfg.FundPerMTokens == 0 {
+		cfg.FundPerMTokens = 1
 	}
 	return cfg
 }

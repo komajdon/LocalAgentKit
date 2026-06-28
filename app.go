@@ -45,6 +45,10 @@ type App struct {
 
 	activeConv *history.Conversation
 
+	// globalTokens is the account-wide cumulative token count (prompt+completion
+	// across all conversations) backing the shared usage budget. Guarded by mu.
+	globalTokens int64
+
 	recMu  sync.Mutex
 	recSes *recorder.Session
 }
@@ -58,6 +62,8 @@ func (a *App) startup(ctx context.Context) {
 		runtime.EventsEmit(ctx, "app:fatal", "Failed to open data store: "+err.Error())
 	}
 	a.cfg = config.Load()
+	p, c := history.TotalUsage()
+	a.globalTokens = p + c
 }
 
 func (a *App) shutdown(_ context.Context) {
@@ -186,6 +192,7 @@ func (a *App) LoadConversation(id string) (*history.Conversation, error) {
 	for _, m := range conv.Messages {
 		agent.InjectMessage(domain.Role(m.Role), m.Content)
 	}
+	agent.SetUsage(conv.TokenUsage.PromptTokens, conv.TokenUsage.CompletionTokens)
 	a.mu.Lock()
 	a.activeConv = conv
 	a.agent = agent
@@ -227,11 +234,48 @@ func (a *App) GetContextUsage() appLayer.ContextUsage {
 	if a.agent == nil {
 		return appLayer.ContextUsage{}
 	}
-	limit := a.cfg.ContextLimit
-	if limit == 0 {
-		limit = 8192
+	return a.agent.CurrentUsage()
+}
+
+// UsageBudget is the shared account-wide usage pool: a fixed data + fund
+// allowance consumed by token usage across all conversations.
+type UsageBudget struct {
+	Tokens       int64   `json:"tokens"`         // cumulative tokens used account-wide
+	DataTotalGB  float64 `json:"data_total_gb"`  // total data allowance
+	DataRemainGB float64 `json:"data_remain_gb"` // remaining data
+	FundTotal    float64 `json:"fund_total"`     // total fund allowance
+	FundRemain   float64 `json:"fund_remain"`    // remaining fund
+	FundUnit     string  `json:"fund_unit"`      // currency label for the fund
+}
+
+// computeBudget derives the shared budget from the global token counter and
+// config. One token is treated as ~4 bytes of data; the fund is charged per
+// million tokens. Callers must hold a.mu.
+func (a *App) computeBudget() UsageBudget {
+	tokens := a.globalTokens
+	dataUsedGB := float64(tokens) * 4 / 1e9
+	fundUsed := float64(tokens) / 1e6 * a.cfg.FundPerMTokens
+	clamp := func(v float64) float64 {
+		if v < 0 {
+			return 0
+		}
+		return v
 	}
-	return appLayer.ContextUsage{Used: a.agent.TokenCount(), Limit: limit}
+	return UsageBudget{
+		Tokens:       tokens,
+		DataTotalGB:  a.cfg.BudgetDataGB,
+		DataRemainGB: clamp(a.cfg.BudgetDataGB - dataUsedGB),
+		FundTotal:    a.cfg.BudgetFund,
+		FundRemain:   clamp(a.cfg.BudgetFund - fundUsed),
+		FundUnit:     "STRRIAL",
+	}
+}
+
+// GetUsageBudget returns the current shared usage budget snapshot.
+func (a *App) GetUsageBudget() UsageBudget {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.computeBudget()
 }
 
 func (a *App) RenameConversation(id, title string) error {
@@ -255,6 +299,52 @@ func (a *App) RenameConversation(id, title string) error {
 	return nil
 }
 
+// SetConversationPinned pins or unpins a conversation in the sidebar.
+func (a *App) SetConversationPinned(id string, pinned bool) error {
+	conv, err := history.Load(id)
+	if err != nil {
+		return err
+	}
+	conv.Pinned = pinned
+	if err := history.Save(conv); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	if a.activeConv != nil && a.activeConv.ID == id {
+		a.activeConv.Pinned = pinned
+	}
+	a.mu.Unlock()
+	return nil
+}
+
+// SetConversationTags replaces a conversation's tag list (trimmed, de-duplicated).
+func (a *App) SetConversationTags(id string, tags []string) error {
+	conv, err := history.Load(id)
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	clean := make([]string, 0, len(tags))
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[strings.ToLower(t)] {
+			continue
+		}
+		seen[strings.ToLower(t)] = true
+		clean = append(clean, t)
+	}
+	conv.Tags = clean
+	if err := history.Save(conv); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	if a.activeConv != nil && a.activeConv.ID == id {
+		a.activeConv.Tags = clean
+	}
+	a.mu.Unlock()
+	return nil
+}
+
 func (a *App) UpdateConversationPath(workDir string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -271,6 +361,92 @@ func (a *App) UpdateConversationPath(workDir string) error {
 
 type ChatResponse struct {
 	Error string `json:"error,omitempty"`
+}
+
+// TruncateAndResend rewrites history up to the userOrdinal-th user message
+// (0-based), drops everything from that message onward, rebuilds the agent on
+// the truncated history, then sends newText as a fresh turn. Used by the
+// "edit & resend" affordance on user messages.
+func (a *App) TruncateAndResend(userOrdinal int, newText string) ChatResponse {
+	a.mu.Lock()
+	if a.agent == nil {
+		a.mu.Unlock()
+		return ChatResponse{Error: "no active conversation — create or load one first"}
+	}
+	if a.cancelFn != nil {
+		a.mu.Unlock()
+		return ChatResponse{Error: "agent is already running"}
+	}
+	conv := a.activeConv
+	if conv == nil {
+		a.mu.Unlock()
+		return ChatResponse{Error: "no active conversation"}
+	}
+
+	cut := userMessageIndex(conv.Messages, userOrdinal)
+	if cut < 0 {
+		a.mu.Unlock()
+		return ChatResponse{Error: "message to edit was not found"}
+	}
+	conv.Messages = conv.Messages[:cut]
+	conv.DisplayItems = truncateDisplayItems(conv.DisplayItems, userOrdinal)
+
+	// Rebuild the agent on the truncated history, preserving cumulative usage.
+	agent := a.buildAgent(conv.WorkDir)
+	for _, m := range conv.Messages {
+		agent.InjectMessage(domain.Role(m.Role), m.Content)
+	}
+	agent.SetUsage(conv.TokenUsage.PromptTokens, conv.TokenUsage.CompletionTokens)
+	a.agent = agent
+	_ = history.Save(conv)
+	a.mu.Unlock()
+
+	return a.SendMessage(newText)
+}
+
+// userMessageIndex returns the slice index of the ordinal-th user message
+// (0-based), or -1 if there are fewer user messages than that.
+func userMessageIndex(msgs []history.SavedMessage, ordinal int) int {
+	seen := 0
+	for i, m := range msgs {
+		if m.Role != string(domain.RoleUser) {
+			continue
+		}
+		if strings.HasPrefix(m.Content, "TOOL_RESULT") {
+			continue // protocol echo, not a real user message
+		}
+		if seen == ordinal {
+			return i
+		}
+		seen++
+	}
+	return -1
+}
+
+// truncateDisplayItems drops display items from the ordinal-th user message item
+// onward, so the saved transcript matches the truncated message history.
+func truncateDisplayItems(raw json.RawMessage, ordinal int) json.RawMessage {
+	items := parseDisplayItems(raw)
+	seen := 0
+	cut := len(items)
+	for i, it := range items {
+		if it.Type != "msg" {
+			continue
+		}
+		if role, _ := it.Data["role"].(string); role != "user" {
+			continue
+		}
+		if seen == ordinal {
+			cut = i
+			break
+		}
+		seen++
+	}
+	out, err := json.Marshal(items[:cut])
+	if err != nil {
+		return raw
+	}
+	return json.RawMessage(out)
 }
 
 func (a *App) SendMessage(text string) ChatResponse {
@@ -411,9 +587,20 @@ func (a *App) SendMessage(text string) ChatResponse {
 				conv.DisplayItems = json.RawMessage(raw)
 			}
 
+			oldTotal := int64(conv.TokenUsage.PromptTokens + conv.TokenUsage.CompletionTokens)
+			prompt, completion := a.agent.Usage()
+			conv.TokenUsage = history.TokenUsage{PromptTokens: prompt, CompletionTokens: completion}
+			// Advance the shared account-wide counter by only the new tokens.
+			if delta := int64(prompt+completion) - oldTotal; delta > 0 {
+				a.globalTokens += delta
+			}
+			budget := a.computeBudget()
+
 			conv.UpdatedAt = time.Now()
 			_ = history.Save(conv)
 			a.mu.Unlock()
+
+			runtime.EventsEmit(a.ctx, "chat:usage_budget", budget)
 		}
 
 		runtime.EventsEmit(a.ctx, "chat:done", nil)

@@ -16,6 +16,8 @@ type ConvMeta struct {
 	Title     string    `json:"title"`
 	WorkDir   string    `json:"work_dir"`
 	Model     string    `json:"model,omitempty"` // per-conversation model override
+	Pinned    bool      `json:"pinned,omitempty"`
+	Tags      []string  `json:"tags,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -25,10 +27,17 @@ type SavedMessage struct {
 	Content string `json:"content"`
 }
 
+// TokenUsage stores cumulative real token counts for a conversation.
+type TokenUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
 type Conversation struct {
 	ConvMeta
 	Messages     []SavedMessage  `json:"messages"`
 	DisplayItems json.RawMessage `json:"display_items,omitempty"`
+	TokenUsage   TokenUsage      `json:"token_usage,omitempty"`
 }
 
 // List returns metadata for all conversations, sorted newest-first.
@@ -83,6 +92,21 @@ func Search(query string) ([]ConvMeta, error) {
 		return results[i].UpdatedAt.After(results[j].UpdatedAt)
 	})
 	return results, nil
+}
+
+// TotalUsage sums cumulative token usage across every conversation — the basis
+// for the shared account-wide usage budget.
+func TotalUsage() (promptTokens, completionTokens int64) {
+	_ = store.Scan(bucket, func(_ string, raw []byte) error {
+		var c Conversation
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil
+		}
+		promptTokens += int64(c.TokenUsage.PromptTokens)
+		completionTokens += int64(c.TokenUsage.CompletionTokens)
+		return nil
+	})
+	return promptTokens, completionTokens
 }
 
 // Load retrieves a single conversation by ID.

@@ -22,10 +22,21 @@ type openAIMessage struct {
 	Content string `json:"content"`
 }
 
+type openAIStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 type openAIChatRequest struct {
-	Model    string          `json:"model"`
-	Messages []openAIMessage `json:"messages"`
-	Stream   bool            `json:"stream"`
+	Model         string               `json:"model"`
+	Messages      []openAIMessage      `json:"messages"`
+	Stream        bool                 `json:"stream"`
+	StreamOptions *openAIStreamOptions `json:"stream_options,omitempty"`
+}
+
+type openAIUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 type openAIChoice struct {
@@ -40,6 +51,7 @@ type openAIChoice struct {
 
 type openAIChatResponse struct {
 	Choices []openAIChoice `json:"choices"`
+	Usage   *openAIUsage   `json:"usage"`
 }
 
 // OpenAIProvider talks to any OpenAI-compatible endpoint.
@@ -58,34 +70,38 @@ func NewOpenAIProvider(baseURL, apiKey string) *OpenAIProvider {
 	}
 }
 
-func (p *OpenAIProvider) ChatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, error) {
-	var result string
+func (p *OpenAIProvider) ChatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, *domain.Usage, error) {
+	var (
+		result string
+		usage  *domain.Usage
+	)
 	err := withRetry(ctx, func() error {
 		var e error
-		result, e = p.chatStream(ctx, model, messages, onChunk)
+		result, usage, e = p.chatStream(ctx, model, messages, onChunk)
 		return e
 	})
-	return result, err
+	return result, usage, err
 }
 
-func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, error) {
+func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, *domain.Usage, error) {
 	msgs := make([]openAIMessage, len(messages))
 	for i, m := range messages {
 		msgs[i] = openAIMessage{Role: string(m.Role), Content: m.Content}
 	}
 
 	body, err := json.Marshal(openAIChatRequest{
-		Model:    model,
-		Messages: msgs,
-		Stream:   true,
+		Model:         model,
+		Messages:      msgs,
+		Stream:        true,
+		StreamOptions: &openAIStreamOptions{IncludeUsage: true},
 	})
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if p.apiKey != "" {
@@ -94,17 +110,19 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("connection failed: %w", err)
+		return "", nil, fmt.Errorf("connection failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(b))
+		return "", nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(b))
 	}
 
 	var full strings.Builder
+	var usage *domain.Usage
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024) // 8 MB max token
 	for scanner.Scan() {
 		line := strings.TrimPrefix(scanner.Text(), "data: ")
 		if line == "" || line == "[DONE]" {
@@ -113,6 +131,14 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 		var chunk openAIChatResponse
 		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 			continue
+		}
+		// The final usage chunk carries an empty choices array.
+		if chunk.Usage != nil {
+			usage = &domain.Usage{
+				PromptTokens:     chunk.Usage.PromptTokens,
+				CompletionTokens: chunk.Usage.CompletionTokens,
+				TotalTokens:      chunk.Usage.TotalTokens,
+			}
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -123,7 +149,7 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 			onChunk(text)
 		}
 	}
-	return full.String(), scanner.Err()
+	return full.String(), usage, scanner.Err()
 }
 
 func (p *OpenAIProvider) ListModels() ([]string, error) {

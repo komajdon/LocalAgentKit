@@ -3,6 +3,8 @@ export namespace app {
 	export class ContextUsage {
 	    used: number;
 	    limit: number;
+	    total: number;
+	    estimated: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ContextUsage(source);
@@ -12,6 +14,8 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.used = source["used"];
 	        this.limit = source["limit"];
+	        this.total = source["total"];
+	        this.estimated = source["estimated"];
 	    }
 	}
 
@@ -51,6 +55,12 @@ export namespace config {
 	    context_limit: number;
 	    mcp_servers: MCPServerConfig[];
 	    notifications: boolean;
+	    search_provider: string;
+	    search_api_key: string;
+	    theme: string;
+	    budget_data_gb: number;
+	    budget_fund: number;
+	    fund_per_mtokens: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -69,6 +79,12 @@ export namespace config {
 	        this.context_limit = source["context_limit"];
 	        this.mcp_servers = this.convertValues(source["mcp_servers"], MCPServerConfig);
 	        this.notifications = source["notifications"];
+	        this.search_provider = source["search_provider"];
+	        this.search_api_key = source["search_api_key"];
+	        this.theme = source["theme"];
+	        this.budget_data_gb = source["budget_data_gb"];
+	        this.budget_fund = source["budget_fund"];
+	        this.fund_per_mtokens = source["fund_per_mtokens"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -99,6 +115,8 @@ export namespace history {
 	    title: string;
 	    work_dir: string;
 	    model?: string;
+	    pinned?: boolean;
+	    tags?: string[];
 	    // Go type: time
 	    created_at: any;
 	    // Go type: time
@@ -114,6 +132,8 @@ export namespace history {
 	        this.title = source["title"];
 	        this.work_dir = source["work_dir"];
 	        this.model = source["model"];
+	        this.pinned = source["pinned"];
+	        this.tags = source["tags"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
 	    }
@@ -135,6 +155,20 @@ export namespace history {
 		    }
 		    return a;
 		}
+	}
+	export class TokenUsage {
+	    prompt_tokens: number;
+	    completion_tokens: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TokenUsage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.prompt_tokens = source["prompt_tokens"];
+	        this.completion_tokens = source["completion_tokens"];
+	    }
 	}
 	export class SavedMessage {
 	    role: string;
@@ -155,12 +189,15 @@ export namespace history {
 	    title: string;
 	    work_dir: string;
 	    model?: string;
+	    pinned?: boolean;
+	    tags?: string[];
 	    // Go type: time
 	    created_at: any;
 	    // Go type: time
 	    updated_at: any;
 	    messages: SavedMessage[];
 	    display_items?: number[];
+	    token_usage?: TokenUsage;
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -172,10 +209,13 @@ export namespace history {
 	        this.title = source["title"];
 	        this.work_dir = source["work_dir"];
 	        this.model = source["model"];
+	        this.pinned = source["pinned"];
+	        this.tags = source["tags"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
 	        this.messages = this.convertValues(source["messages"], SavedMessage);
 	        this.display_items = source["display_items"];
+	        this.token_usage = this.convertValues(source["token_usage"], TokenUsage);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -196,6 +236,7 @@ export namespace history {
 		    return a;
 		}
 	}
+	
 
 }
 
@@ -257,6 +298,28 @@ export namespace main {
 	        this.current = source["current"];
 	        this.latest = source["latest"];
 	        this.url = source["url"];
+	    }
+	}
+	export class UsageBudget {
+	    tokens: number;
+	    data_total_gb: number;
+	    data_remain_gb: number;
+	    fund_total: number;
+	    fund_remain: number;
+	    fund_unit: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UsageBudget(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tokens = source["tokens"];
+	        this.data_total_gb = source["data_total_gb"];
+	        this.data_remain_gb = source["data_remain_gb"];
+	        this.fund_total = source["fund_total"];
+	        this.fund_remain = source["fund_remain"];
+	        this.fund_unit = source["fund_unit"];
 	    }
 	}
 
