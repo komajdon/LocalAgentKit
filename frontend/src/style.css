@@ -27,6 +27,31 @@
   font-size: 14px;
 }
 
+/* Light theme — overrides every colour token; layout vars stay shared. */
+:root[data-theme="light"] {
+  --bg:       #f4f6fb;
+  --surface1: #ffffff;
+  --surface2: #eef1f8;
+  --surface3: #e4e8f3;
+  --surface4: #d8deee;
+  --border:   #d9deec;
+  --border2:  #c2c9de;
+  --text:     #1b2138;
+  --text2:    #4a5578;
+  --text3:    #8089a8;
+  --accent:   #5d70e8;
+  --accent2:  #4759cf;
+  --glow:     rgba(93,112,232,0.16);
+  --green:    #16a34a;
+  --green-bg: rgba(22,163,74,0.10);
+  --red:      #dc2626;
+  --red-bg:   rgba(220,38,38,0.08);
+  --orange:   #ea7317;
+  --tool:     #0d9488;
+  --tool-bg:  rgba(13,148,136,0.08);
+  color-scheme: light;
+}
+
 html, body, #root { height: 100%; overflow: hidden; }
 
 body {
@@ -1080,6 +1105,48 @@ body {
   font-size: 14px; cursor: pointer; padding: 2px 4px; line-height: 1;
 }
 .update-dismiss:hover { color: var(--text); }
+
+/* ── Message edit & resend ────────────────────────────────────────────── */
+.msg-edit { display: flex; flex-direction: column; gap: 8px; min-width: 320px; }
+.msg-edit textarea {
+  width: 100%; resize: vertical; font: inherit; color: var(--text);
+  background: var(--surface1); border: 1px solid var(--border2);
+  border-radius: var(--rs); padding: 8px 10px; line-height: 1.5;
+}
+.msg-edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.msg-actions { display: flex; gap: 4px; }
+
+/* ── Conversation row actions / pin / tags ────────────────────────────── */
+.conv-row-actions { display: flex; align-items: center; gap: 2px; }
+.conv-act {
+  background: none; border: none; cursor: pointer; opacity: 0;
+  font-size: 12px; padding: 2px 3px; line-height: 1; border-radius: var(--rx);
+  transition: opacity 0.12s, background 0.12s;
+}
+.conv-row:hover .conv-act { opacity: 0.65; }
+.conv-act:hover { opacity: 1; background: var(--surface3); }
+.conv-pin-mark { margin-right: 4px; font-size: 11px; }
+
+.conv-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0 1px; }
+.conv-tag {
+  font-size: 10px; padding: 1px 7px; border-radius: 10px; cursor: pointer;
+  background: var(--surface3); color: var(--text2); border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.conv-tag:hover { color: var(--text); border-color: var(--border2); }
+.conv-tag.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.tag-filter-bar {
+  display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+  padding: 6px 12px; border-bottom: 1px solid var(--border);
+}
+.tag-filter-clear { font-size: 10px; color: var(--text3); cursor: pointer; margin-left: 2px; }
+.tag-filter-clear:hover { color: var(--text); }
+
+/* ── Usage budget settings ────────────────────────────────────────────── */
+.budget-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.budget-grid input { width: 100%; }
+.budget-sub { display: block; font-size: 11px; color: var(--text2); margin-bottom: 3px; }
 
 /* ── Thinking indicator ───────────────────────────────────────────────── */
 .thinking-dots { display: inline-flex; gap: 4px; align-items: center; padding: 2px 0; }

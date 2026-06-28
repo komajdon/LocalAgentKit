@@ -26,6 +26,10 @@ export function GetContextUsage() {
   return window['go']['main']['App']['GetContextUsage']();
 }
 
+export function GetUsageBudget() {
+  return window['go']['main']['App']['GetUsageBudget']();
+}
+
 export function GetVersion() {
   return window['go']['main']['App']['GetVersion']();
 }
@@ -94,6 +98,14 @@ export function SetConversationModel(arg1) {
   return window['go']['main']['App']['SetConversationModel'](arg1);
 }
 
+export function SetConversationPinned(arg1, arg2) {
+  return window['go']['main']['App']['SetConversationPinned'](arg1, arg2);
+}
+
+export function SetConversationTags(arg1, arg2) {
+  return window['go']['main']['App']['SetConversationTags'](arg1, arg2);
+}
+
 export function StartRecording() {
   return window['go']['main']['App']['StartRecording']();
 }
@@ -108,6 +120,10 @@ export function StopRecording() {
 
 export function TranscribeAudio(arg1) {
   return window['go']['main']['App']['TranscribeAudio'](arg1);
+}
+
+export function TruncateAndResend(arg1, arg2) {
+  return window['go']['main']['App']['TruncateAndResend'](arg1, arg2);
 }
 
 export function UpdateConversationPath(arg1) {

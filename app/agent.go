@@ -25,10 +25,13 @@ type PermissionRequest struct {
 	Args        map[string]string `json:"args"`
 }
 
-// ContextUsage reports approximate token usage for the current conversation.
+// ContextUsage reports token usage for the current conversation.
+// Used/Limit drive the context bar; Total is the cumulative billed tokens.
 type ContextUsage struct {
-	Used  int `json:"used"`
-	Limit int `json:"limit"`
+	Used      int  `json:"used"`
+	Limit     int  `json:"limit"`
+	Total     int  `json:"total"`     // cumulative prompt+completion tokens this conversation
+	Estimated bool `json:"estimated"` // true when Used is a character heuristic, not real usage
 }
 
 // ConversationalAgent drives one conversation: it maintains history,
@@ -39,6 +42,13 @@ type ConversationalAgent struct {
 	registry     *domain.ToolRegistry
 	conv         *domain.Conversation
 	contextLimit int // max tokens (0 = no limit)
+
+	// Real token usage reported by the provider.
+	lastPromptTokens      int  // prompt tokens of the most recent call (≈ current context size)
+	lastCompletionTokens  int  // completion tokens of the most recent call
+	totalPromptTokens     int  // cumulative across the conversation (for cost)
+	totalCompletionTokens int  // cumulative across the conversation
+	hasRealUsage          bool // true once any provider call reported usage
 
 	OnChunk             func(string)
 	OnToolCall          func(name string, args map[string]string)
@@ -108,7 +118,7 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			a.trimToContextLimit()
 		}
 
-		response, err := a.provider.ChatStream(ctx, a.model, a.conv.Full(), func(chunk string) {
+		response, usage, err := a.provider.ChatStream(ctx, a.model, a.conv.Full(), func(chunk string) {
 			if a.OnChunk != nil {
 				a.OnChunk(chunk)
 			}
@@ -119,6 +129,7 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			}
 			return fmt.Errorf("LLM error: %w", err)
 		}
+		a.recordUsage(usage)
 
 		a.conv.Add(domain.Message{Role: domain.RoleAssistant, Content: response})
 		a.emitContextUsage()
@@ -191,15 +202,56 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 	return fmt.Errorf("agent exceeded maximum tool iterations (%d) — stopping to prevent a runaway loop", maxToolIterations)
 }
 
-func (a *ConversationalAgent) emitContextUsage() {
-	if a.OnContextUsage == nil {
+// recordUsage folds one provider usage report into the running totals.
+func (a *ConversationalAgent) recordUsage(u *domain.Usage) {
+	if u == nil {
 		return
 	}
+	a.hasRealUsage = true
+	a.lastPromptTokens = u.PromptTokens
+	a.lastCompletionTokens = u.CompletionTokens
+	a.totalPromptTokens += u.PromptTokens
+	a.totalCompletionTokens += u.CompletionTokens
+}
+
+// Usage returns the cumulative prompt and completion token totals.
+func (a *ConversationalAgent) Usage() (prompt, completion int) {
+	return a.totalPromptTokens, a.totalCompletionTokens
+}
+
+// SetUsage restores cumulative totals (used when a conversation is reloaded).
+// It deliberately does not touch the "current context" estimate: after a reload
+// we have no real measurement of the live context size until the next call, so
+// the heuristic stays in effect (hasRealUsage remains false) while Total still
+// reflects the restored cumulative usage.
+func (a *ConversationalAgent) SetUsage(prompt, completion int) {
+	a.totalPromptTokens = prompt
+	a.totalCompletionTokens = completion
+}
+
+// CurrentUsage builds the context-usage snapshot, preferring real provider
+// token counts and falling back to the character heuristic.
+func (a *ConversationalAgent) CurrentUsage() ContextUsage {
 	limit := a.contextLimit
 	if limit == 0 {
 		limit = 8192
 	}
-	a.OnContextUsage(ContextUsage{Used: a.TokenCount(), Limit: limit})
+	usage := ContextUsage{Limit: limit, Total: a.totalPromptTokens + a.totalCompletionTokens}
+	if a.hasRealUsage {
+		// Real current context ≈ the last prompt plus the completion it produced.
+		usage.Used = a.lastPromptTokens + a.lastCompletionTokens
+	} else {
+		usage.Used = a.TokenCount()
+		usage.Estimated = true
+	}
+	return usage
+}
+
+func (a *ConversationalAgent) emitContextUsage() {
+	if a.OnContextUsage == nil {
+		return
+	}
+	a.OnContextUsage(a.CurrentUsage())
 }
 
 // trimToContextLimit drops the oldest non-system messages (pairs if possible)

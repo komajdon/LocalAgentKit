@@ -29,7 +29,9 @@ type ollamaChatResponse struct {
 	Message struct {
 		Content string `json:"content"`
 	} `json:"message"`
-	Done bool `json:"done"`
+	Done            bool `json:"done"`
+	PromptEvalCount int  `json:"prompt_eval_count"`
+	EvalCount       int  `json:"eval_count"`
 }
 
 // OllamaProvider talks to Ollama's native /api/chat endpoint.
@@ -45,17 +47,20 @@ func NewOllamaProvider(host string) *OllamaProvider {
 	}
 }
 
-func (p *OllamaProvider) ChatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, error) {
-	var result string
+func (p *OllamaProvider) ChatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, *domain.Usage, error) {
+	var (
+		result string
+		usage  *domain.Usage
+	)
 	err := withRetry(ctx, func() error {
 		var e error
-		result, e = p.chatStream(ctx, model, messages, onChunk)
+		result, usage, e = p.chatStream(ctx, model, messages, onChunk)
 		return e
 	})
-	return result, err
+	return result, usage, err
 }
 
-func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, error) {
+func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, *domain.Usage, error) {
 	msgs := make([]ollamaMessage, len(messages))
 	for i, m := range messages {
 		msgs[i] = ollamaMessage{Role: string(m.Role), Content: m.Content}
@@ -67,26 +72,27 @@ func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages 
 		Stream:   true,
 	})
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.host+"/api/chat", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("connection failed: %w", err)
+		return "", nil, fmt.Errorf("connection failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("ollama error %d: %s", resp.StatusCode, string(b))
+		return "", nil, fmt.Errorf("ollama error %d: %s", resp.StatusCode, string(b))
 	}
 
 	var full strings.Builder
+	var usage *domain.Usage
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024) // 8 MB max token
 	for scanner.Scan() {
@@ -103,10 +109,18 @@ func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages 
 			onChunk(cr.Message.Content)
 		}
 		if cr.Done {
+			// The final message carries token counts for the whole exchange.
+			if cr.PromptEvalCount > 0 || cr.EvalCount > 0 {
+				usage = &domain.Usage{
+					PromptTokens:     cr.PromptEvalCount,
+					CompletionTokens: cr.EvalCount,
+					TotalTokens:      cr.PromptEvalCount + cr.EvalCount,
+				}
+			}
 			break
 		}
 	}
-	return full.String(), scanner.Err()
+	return full.String(), usage, scanner.Err()
 }
 
 func (p *OllamaProvider) ListModels() ([]string, error) {
