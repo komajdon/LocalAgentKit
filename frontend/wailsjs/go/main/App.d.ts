@@ -70,3 +70,7 @@ export function TruncateAndResend(arg1:number,arg2:string):Promise<main.ChatResp
 export function UpdateConversationPath(arg1:string):Promise<void>;
 
 export function WhisperAvailable():Promise<boolean>;
+
+export function BranchConversation(arg1:string,arg2:number):Promise<history.Conversation>;
+
+export function ImportConversation():Promise<string>;

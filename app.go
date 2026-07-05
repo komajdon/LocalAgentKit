@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -67,8 +68,329 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(_ context.Context) {
+	a.writeAutoBackup()
 	tools.ShutdownMCPClients()
 	_ = store.Close()
+}
+
+// ── Auto-backup ─────────────────────────────────────────────────────────────────
+
+const maxBackupArchives = 7
+
+// writeAutoBackup creates a timestamped backup archive in data/backups/ and prunes
+// old archives down to maxBackupArchives. Safe to call multiple times.
+func (a *App) writeAutoBackup() {
+	dataDir := store.DataDir()
+	backupDir := filepath.Join(dataDir, "backups")
+	if err := os.MkdirAll(backupDir, 0700); err != nil {
+		return
+	}
+	now := time.Now().Format("2006-01-02_150405")
+	dest := filepath.Join(backupDir, "backup-"+now+".tar.gz")
+	if err := writeBackupArchive(dest, dataDir); err != nil {
+		return
+	}
+	// Prune old archives — keep only the N most recent.
+	entries, err := filepath.Glob(filepath.Join(backupDir, "backup-*.tar.gz"))
+	if err != nil {
+		return
+	}
+	if len(entries) > maxBackupArchives {
+		sort.Strings(entries)
+		// Sort lexicographically (ISO timestamps) so oldest come first.
+		toRemove := len(entries) - maxBackupArchives
+		for i := 0; i < toRemove; i++ {
+			_ = os.Remove(entries[i])
+		}
+	}
+}
+
+// ── Branching ───────────────────────────────────────────────────────────────────
+
+// BranchConversation creates a new conversation that is a copy of the source
+// conversation up to (and including) the message at displayItemIndex. It
+// re-sends the last user message in the copy and returns the new conversation.
+func (a *App) BranchConversation(id string, displayItemIndex int) (*history.Conversation, error) {
+	src, err := history.Load(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Determine the cut point in the message slice.
+	// Walk display items and saved messages in parallel so we know how many
+	// saved messages to keep.
+	items := parseDisplayItems(src.DisplayItems)
+	if displayItemIndex < 0 || displayItemIndex >= len(items) {
+		return nil, fmt.Errorf("invalid item index %d (max %d)", displayItemIndex, len(items)-1)
+	}
+
+	// Count how many visible user/assistant messages we need up to the branching
+	// item. Branching from a user message copies the prior context and re-sends
+	// that user message. Branching from an assistant message copies through that
+	// assistant response and does not fabricate a user turn.
+	visibleOrdinal := -1
+	includeSelected := true
+	resendText := ""
+	msgCount := 0
+	for i, it := range items {
+		if it.Type != "msg" {
+			continue
+		}
+		role, _ := it.Data["role"].(string)
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		if i == displayItemIndex {
+			text, _ := it.Data["text"].(string)
+			visibleOrdinal = msgCount
+			if role == "user" {
+				includeSelected = false
+				resendText = text
+			}
+			break
+		}
+		// There should be a matching SavedMessage for every display msg.
+		msgCount++
+	}
+	cutMsgIdx := visibleMessageCut(src.Messages, visibleOrdinal, includeSelected)
+	if cutMsgIdx < 0 || cutMsgIdx > len(src.Messages) {
+		return nil, fmt.Errorf("could not map display item to message index")
+	}
+
+	now := time.Now()
+	branch := &history.Conversation{
+		ConvMeta: history.ConvMeta{
+			ID:        conversationID("branch", 0),
+			Title:     src.Title + " (branch)",
+			WorkDir:   src.WorkDir,
+			Model:     src.Model,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		Messages:   make([]history.SavedMessage, cutMsgIdx),
+		TokenUsage: src.TokenUsage,
+	}
+	copy(branch.Messages, src.Messages[:cutMsgIdx])
+
+	// Truncate display items to match the copied history. When re-sending a user
+	// message, omit that original item so the new branch has one canonical turn.
+	displayCut := displayItemIndex + 1
+	if resendText != "" {
+		displayCut = displayItemIndex
+	}
+	branchItems := make([]displayItem, displayCut)
+	copy(branchItems, items[:displayCut])
+	raw, _ := json.Marshal(branchItems)
+	branch.DisplayItems = json.RawMessage(raw)
+
+	if err := history.Save(branch); err != nil {
+		return nil, err
+	}
+
+	// Build agent, inject history, and re-send the branching message.
+	agent := a.buildAgent(branch.WorkDir)
+	for _, m := range branch.Messages {
+		agent.InjectMessage(domain.Role(m.Role), m.Content)
+	}
+	agent.SetUsage(branch.TokenUsage.PromptTokens, branch.TokenUsage.CompletionTokens)
+
+	a.mu.Lock()
+	a.activeConv = branch
+	a.agent = agent
+	a.mu.Unlock()
+
+	if resendText == "" {
+		return branch, nil
+	}
+
+	// Re-send the message on the branch.
+	a.SendMessage(resendText)
+
+	return branch, nil
+}
+
+// ── Conversation Import ─────────────────────────────────────────────────────────
+
+// ImportConversation opens a file dialog and imports conversations from:
+//   - This app's own JSON format (a single Conversation JSON)
+//   - ChatGPT conversations.json  (array of {title, messages: [{role, content}]})
+//   - Claude claude_conversations.json (array of {name, messages: [{role, content}]})
+//
+// Returns the list of newly imported ConvMeta so the frontend can show a preview.
+func (a *App) ImportConversation() string {
+	src, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Import Conversation",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "JSON files (*.json)", Pattern: "*.json"},
+		},
+	})
+	if err != nil || src == "" {
+		return ""
+	}
+
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "Cannot read file: " + err.Error()
+	}
+
+	imported := a.importFromJSON(data)
+	if imported == 0 {
+		return "No valid conversations found in the file."
+	}
+	return fmt.Sprintf("Imported %d conversation(s).", imported)
+}
+
+func (a *App) importFromJSON(data []byte) int {
+	count := 0
+
+	// Try own format first (single Conversation object).
+	var conv history.Conversation
+	if err := json.Unmarshal(data, &conv); err == nil && conv.ID != "" {
+		conv.ID = conversationID("import", 0)
+		conv.CreatedAt = time.Now()
+		conv.UpdatedAt = time.Now()
+		if conv.Title == "" {
+			conv.Title = "Imported conversation"
+		}
+		if len(conv.DisplayItems) == 0 {
+			conv.DisplayItems = displayItemsFromMessages(conv.Messages)
+		}
+		if err := history.Save(&conv); err == nil {
+			count++
+		}
+		return count
+	}
+
+	// Try array — might be ChatGPT or Claude format.
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return count
+	}
+
+	for i, item := range raw {
+		if c := a.importRawItem(item); c != nil {
+			c.ID = conversationID("import", i)
+			if err := history.Save(c); err == nil {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func (a *App) importRawItem(raw json.RawMessage) *history.Conversation {
+	// Try ChatGPT format: {title, messages: [{role, content}]}
+	var chatGPTChat struct {
+		Title    string `json:"title"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &chatGPTChat); err == nil && len(chatGPTChat.Messages) > 0 {
+		now := time.Now()
+		conv := &history.Conversation{
+			ConvMeta: history.ConvMeta{
+				ID:        conversationID("chatgpt", 0),
+				Title:     chatGPTChat.Title,
+				WorkDir:   "",
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			Messages: make([]history.SavedMessage, 0, len(chatGPTChat.Messages)),
+		}
+		if conv.Title == "" {
+			conv.Title = "ChatGPT import"
+		}
+		for _, m := range chatGPTChat.Messages {
+			if m.Role == "user" || m.Role == "assistant" {
+				conv.Messages = append(conv.Messages, history.SavedMessage{Role: m.Role, Content: m.Content})
+			}
+		}
+		conv.DisplayItems = displayItemsFromMessages(conv.Messages)
+		return conv
+	}
+
+	// Try Claude format: {name, messages: [{role, content}]}
+	var claudeChat struct {
+		Name     string `json:"name"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &claudeChat); err == nil && len(claudeChat.Messages) > 0 {
+		now := time.Now()
+		title := claudeChat.Name
+		if title == "" {
+			title = "Claude import"
+		}
+		conv := &history.Conversation{
+			ConvMeta: history.ConvMeta{
+				ID:        conversationID("claude", 0),
+				Title:     title,
+				WorkDir:   "",
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			Messages: make([]history.SavedMessage, 0, len(claudeChat.Messages)),
+		}
+		for _, m := range claudeChat.Messages {
+			if m.Role == "user" || m.Role == "assistant" {
+				conv.Messages = append(conv.Messages, history.SavedMessage{Role: m.Role, Content: m.Content})
+			}
+		}
+		conv.DisplayItems = displayItemsFromMessages(conv.Messages)
+		return conv
+	}
+
+	return nil
+}
+
+func conversationID(prefix string, offset int) string {
+	return fmt.Sprintf("%s-%d-%d", prefix, time.Now().UnixNano(), offset)
+}
+
+func displayItemsFromMessages(messages []history.SavedMessage) json.RawMessage {
+	items := make([]displayItem, 0, len(messages))
+	for _, m := range messages {
+		if (m.Role != "user" && m.Role != "assistant") || strings.HasPrefix(m.Content, "TOOL_RESULT") {
+			continue
+		}
+		items = append(items, displayItem{
+			Type: "msg",
+			Data: map[string]any{"role": m.Role, "text": m.Content, "streaming": false},
+		})
+	}
+	raw, _ := json.Marshal(items)
+	return json.RawMessage(raw)
+}
+
+func visibleMessageCut(messages []history.SavedMessage, visibleOrdinal int, includeSelected bool) int {
+	if visibleOrdinal < 0 {
+		return -1
+	}
+	seen := 0
+	for i, m := range messages {
+		if !isVisibleSavedMessage(m) {
+			continue
+		}
+		if seen == visibleOrdinal {
+			if includeSelected {
+				return i + 1
+			}
+			return i
+		}
+		seen++
+	}
+	return -1
+}
+
+func isVisibleSavedMessage(m history.SavedMessage) bool {
+	if m.Role != "user" && m.Role != "assistant" {
+		return false
+	}
+	return !strings.HasPrefix(m.Content, "TOOL_RESULT")
 }
 
 func (a *App) newProvider() domain.LLMProvider {
@@ -476,8 +798,8 @@ func (a *App) SendMessage(text string) ChatResponse {
 		}()
 
 		var (
-			turnMu   sync.Mutex
-			asstBuf  strings.Builder
+			turnMu    sync.Mutex
+			asstBuf   strings.Builder
 			turnItems = []displayItem{
 				{Type: "msg", Data: map[string]any{"role": "user", "text": text, "streaming": false}},
 			}

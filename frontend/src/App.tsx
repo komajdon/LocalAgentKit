@@ -9,9 +9,9 @@ import {
   TruncateAndResend, SetConversationPinned, SetConversationTags,
   ListModels, ListTools, GetConfig, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
-  ListMCPServers, SaveMCPServers, ProbeMCPServer,
+  ListMCPServers, ProbeMCPServer,
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup,
-  GetUsageBudget,
+  GetUsageBudget, GetContextUsage, BranchConversation, ImportConversation,
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -85,7 +85,7 @@ function timeAgo(iso: string) {
 
 function shortPath(p: string) {
   if (!p) return '~'
-  const m = p.match(/^\/home\/[^/]+/)
+  const m = p.match(/^(?:\/home\/[^/]+|\/Users\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/)
   if (m) return '~' + p.slice(m[0].length) || '~'
   return p.length > 26 ? '…' + p.slice(-24) : p
 }
@@ -168,6 +168,12 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<ConvMeta[] | null>(null)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // sidebar collapse — persisted in localStorage
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === 'true')
+
+  // import feedback
+  const [importMsg, setImportMsg] = useState('')
+
   // OS notifications — refs so the once-registered event listeners read live values
   const notifyEnabledRef = useRef(true)
   const sendStartRef     = useRef(0)
@@ -218,9 +224,43 @@ export default function App() {
     },
   ]
 
+  // Virtual scroller refs & state
+  const msgContainerRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const isNearBottom = useRef(true)
+
+  const VIRTUAL_OVERSCAN = 6
+
+  const estItemHeight = (it: Item): number => {
+    if (it.type === 'error') return 48
+    if (it.type === 'tool') return 48
+    return Math.max(80, Math.min(500, it.data.text.length * 0.3 + 50))
+  }
+
+  const computeVirtualRange = () => {
+    if (items.length === 0) return { start: 0, end: 0, offsets: [], total: 0 }
+    const heights = items.map(estItemHeight)
+    const offsets: number[] = []
+    let total = 0
+    for (const h of heights) { offsets.push(total); total += h }
+    const ch = msgContainerRef.current?.clientHeight ?? 600
+    const viewTop = scrollTop
+    const viewBot = scrollTop + ch
+    let start = offsets.findIndex((o, i) => o + heights[i] > viewTop - 80 * VIRTUAL_OVERSCAN)
+    if (start < 0) start = Math.max(0, items.length - 1)
+    start = Math.max(0, start - 1)
+    let end = start
+    while (end < items.length && offsets[end] < viewBot + 80 * VIRTUAL_OVERSCAN) end++
+    return { start, end, offsets, total, heights }
+  }
+
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [items])
+  useEffect(() => {
+    if (isNearBottom.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [items])
 
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -398,6 +438,7 @@ export default function App() {
     setConvModel((conv as any).model || '')
     setCtxUsage(null)
     setRunning(false); streamIdRef.current = null
+    GetContextUsage().then((u: any) => setCtxUsage(u)).catch(() => {})
 
     if (conv.display_items?.length) {
       setItems(conv.display_items.map((it: any) => ({
@@ -572,6 +613,44 @@ export default function App() {
     }, 300)
   }
 
+  const toggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev
+      localStorage.setItem('sidebar-collapsed', String(next))
+      return next
+    })
+  }
+
+  const branchFromHere = async (itemIdx: number) => {
+    if (!activeId || running) return
+    try {
+      const branchItem = items[itemIdx]
+      const conv = await BranchConversation(activeId, itemIdx) as any
+      await refreshList()
+      setActiveId(conv.id); setActiveTitle(conv.title); setActivePath(conv.work_dir)
+      setConvModel(conv.model || '')
+      const nextItems: Item[] = (conv.display_items || []).map((it: any) => ({
+        ...it,
+        data: { ...it.data, id: uid(), streaming: false },
+      }))
+      if (branchItem?.type === 'msg' && branchItem.data.role === 'user') {
+        nextItems.push({ type: 'msg', data: { id: uid(), role: 'user', text: branchItem.data.text } })
+        setRunning(true); setThinking(true); streamIdRef.current = null
+        sendStartRef.current = Date.now()
+      }
+      setItems(nextItems)
+    } catch (err) {
+      console.error('branch failed', err)
+    }
+  }
+
+  const importConversation = async () => {
+    setImportMsg('')
+    const result = await ImportConversation() as string
+    if (result) setImportMsg(result)
+    if (result && !result.startsWith('No')) refreshList()
+  }
+
   const exportConv = async (format: 'markdown' | 'text' | 'json') => {
     if (!activeId) return
     const text = await ExportConversation(activeId, format) as string
@@ -593,7 +672,6 @@ export default function App() {
     setSavingCfg(true)
     try {
       await SaveConfig({ ...cfg, mcp_servers: mcpServers } as any)
-      await SaveMCPServers(mcpServers as any)
       const r = await ListModels() as any
       if (r.models) setModels(r.models)
       setShowCfg(false)
@@ -695,67 +773,90 @@ export default function App() {
       )}
 
       {/* ── Sidebar ── */}
-      <aside className="sidebar">
+      <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}
+        role="navigation" aria-label="Conversations">
         <div className="sidebar-head">
           <div className="brand">
             <div className="brand-icon">🤖</div>
-            <div>
-              <div className="brand-name">AI Agent</div>
-              <div className="brand-sub">Powered by Komajdon</div>
-            </div>
+            {!sidebarCollapsed && (
+              <div>
+                <div className="brand-name">AI Agent</div>
+                <div className="brand-sub">Powered by Komajdon</div>
+              </div>
+            )}
           </div>
-          <button className="new-btn" onClick={() => setShowNew(true)}>＋ New conversation</button>
-        </div>
-
-        <div className="sidebar-search">
-          <input
-            className="search-input"
-            placeholder="Search conversations…"
-            value={searchQuery}
-            onChange={e => runSearch(e.target.value)}
-          />
-          {searchQuery && <button className="search-clear" onClick={() => runSearch('')}>✕</button>}
-        </div>
-
-        {allTags.length > 0 && searchResults === null && (
-          <div className="tag-filter-bar">
-            {allTags.map(t => (
-              <span key={t} className={`conv-tag ${tagFilter === t ? 'active' : ''}`}
-                onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</span>
-            ))}
-            {tagFilter && <span className="tag-filter-clear" onClick={() => setTagFilter(null)}>clear ✕</span>}
-          </div>
-        )}
-
-        <div className="conv-list">
-          {searchResults !== null ? (
-            searchResults.length === 0
-              ? <div className="conv-empty">No results for "{searchQuery}"</div>
-              : <ConvGroup label={`Results (${searchResults.length})`} list={searchResults} />
-          ) : convList.length === 0
-            ? <div className="conv-empty">No conversations yet.<br />Click "+ New conversation" to start.</div>
-            : <>
-                <ConvGroup label="📌 Pinned" list={groups.pinned} />
-                <ConvGroup label="Today" list={groups.today} />
-                <ConvGroup label="This week" list={groups.week} />
-                <ConvGroup label="Older" list={groups.older} />
-              </>
+          {sidebarCollapsed
+            ? <button className="new-btn collapsed" onClick={() => setShowNew(true)} aria-label="New conversation">＋</button>
+            : <button className="new-btn" onClick={() => setShowNew(true)} aria-label="New conversation">＋ New conversation</button>
           }
         </div>
 
+        <button className="sidebar-collapse-btn" onClick={toggleSidebar}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          {sidebarCollapsed ? '▶' : '◀'}
+        </button>
+
+        {!sidebarCollapsed && (
+          <>
+            <div className="sidebar-search">
+              <input
+                className="search-input"
+                placeholder="Search conversations…"
+                value={searchQuery}
+                onChange={e => runSearch(e.target.value)}
+                aria-label="Search conversations"
+              />
+              {searchQuery && <button className="search-clear" onClick={() => runSearch('')} aria-label="Clear search">✕</button>}
+            </div>
+
+            {allTags.length > 0 && searchResults === null && (
+              <div className="tag-filter-bar">
+                {allTags.map(t => (
+                  <span key={t} className={`conv-tag ${tagFilter === t ? 'active' : ''}`}
+                    onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</span>
+                ))}
+                {tagFilter && <span className="tag-filter-clear" onClick={() => setTagFilter(null)}>clear ✕</span>}
+              </div>
+            )}
+
+            <div className="conv-list" role="list" aria-label="Conversation list">
+              {searchResults !== null ? (
+                searchResults.length === 0
+                  ? <div className="conv-empty">No results for "{searchQuery}"</div>
+                  : <ConvGroup label={`Results (${searchResults.length})`} list={searchResults} />
+              ) : convList.length === 0
+                ? <div className="conv-empty">No conversations yet.<br />Click "+ New conversation" to start.</div>
+                : <>
+                    <ConvGroup label="📌 Pinned" list={groups.pinned} />
+                    <ConvGroup label="Today" list={groups.today} />
+                    <ConvGroup label="This week" list={groups.week} />
+                    <ConvGroup label="Older" list={groups.older} />
+                  </>
+              }
+            </div>
+          </>
+        )}
+
         <div className="sidebar-foot">
-          <button className="foot-btn" onClick={() => { setShowCfg(true); setCfgTab('general') }}>
-            ⚙️ Settings
-          </button>
-          <div className="conn-badge">
-            <div className="dot" />
-            <span>{cfg.model || 'No model selected'}</span>
-          </div>
+          {sidebarCollapsed ? (
+            <button className="foot-btn collapsed" onClick={() => { setShowCfg(true); setCfgTab('general') }}
+              aria-label="Settings">⚙️</button>
+          ) : (
+            <>
+              <button className="foot-btn" onClick={() => { setShowCfg(true); setCfgTab('general') }}
+                aria-label="Settings">⚙️ Settings</button>
+              <div className="conn-badge">
+                <div className="dot" />
+                <span>{cfg.model || 'No model selected'}</span>
+              </div>
+            </>
+          )}
         </div>
       </aside>
 
       {/* ── Main ── */}
-      <div className="main">
+      <div className="main" role="main" aria-label="Chat area">
         {activeId ? (
           <>
             <div className="topbar">
@@ -828,7 +929,14 @@ export default function App() {
               </div>
             </div>
 
-            <div className="messages">
+            <div className="messages" ref={msgContainerRef}
+              onScroll={e => {
+                const el = e.currentTarget
+                setScrollTop(el.scrollTop)
+                isNearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 200
+              }}
+              role="log" aria-live="polite" aria-label="Conversation messages"
+            >
               {loadingConv && (
                 <div className="conv-loading"><span className="thinking-dots"><span /><span /><span /></span></div>
               )}
@@ -840,73 +948,100 @@ export default function App() {
                 </div>
               )}
 
-              {items.map(item => {
-                if (item.type === 'error')
-                  return <div key={item.id} className="error-row">⚠ {item.text}</div>
-                if (item.type === 'tool') {
-                  const t = item.data
-                  return (
-                    <div key={t.id} className={`tool-evt ${t.kind === 'result' ? 'result' : ''}`}>
-                      <span className="tool-lbl">{t.kind === 'call' ? `🔧 ${t.tool}` : `↩ ${t.tool}`}</span>
-                      <span className="tool-body">{t.body}</span>
-                    </div>
-                  )
-                }
-                const m = item.data
-                const editing = editingId === m.id
+              {items.length > 0 && (() => {
+                const { start, end, offsets, total } = computeVirtualRange()
+                const topPad = offsets[start] || 0
+                const lastIdx = Math.min(end, items.length) - 1
+                const bottomPad = lastIdx >= start ? total - (offsets[lastIdx] + estItemHeight(items[lastIdx])) : 0
                 return (
-                  <div key={m.id} className={`msg-row ${m.role}`}>
-                    <div className={`av ${m.role}`}>{m.role === 'user' ? 'U' : '🤖'}</div>
-                    <div className="bubble-wrap">
-                      <div className="bubble">
-                        {editing ? (
-                          <div className="msg-edit">
-                            <textarea
-                              autoFocus
-                              value={editValue}
-                              onChange={e => setEditValue(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitEdit(m.id) }
-                                if (e.key === 'Escape') { setEditingId(null); setEditValue('') }
-                              }}
-                              rows={Math.min(8, editValue.split('\n').length + 1)}
-                            />
-                            <div className="msg-edit-actions">
-                              <button className="btn secondary" onClick={() => { setEditingId(null); setEditValue('') }}>Cancel</button>
-                              <button className="btn primary" onClick={() => commitEdit(m.id)} disabled={!editValue.trim()}>Save &amp; resend</button>
-                            </div>
+                  <>
+                    {topPad > 0 && <div style={{ height: topPad }} />}
+                    {items.slice(start, end).map((item, i) => {
+                      const globalIdx = start + i
+                      if (item.type === 'error')
+                        return <div key={item.id} className="error-row" role="alert">⚠ {item.text}</div>
+                      if (item.type === 'tool') {
+                        const t = item.data
+                        return (
+                          <div key={t.id} className={`tool-evt ${t.kind === 'result' ? 'result' : ''}`}
+                            role="status" aria-label={`Tool ${t.kind}: ${t.tool}`}>
+                            <span className="tool-lbl">{t.kind === 'call' ? `🔧 ${t.tool}` : `↩ ${t.tool}`}</span>
+                            <span className="tool-body">{t.body}</span>
                           </div>
-                        ) : m.role === 'assistant' && !m.streaming
-                          ? <Markdown text={m.text} />
-                          : <span>{m.text}{m.streaming && <span className="cursor" />}</span>
-                        }
-                      </div>
-                      {!m.streaming && !editing && (
-                        <div className="msg-actions">
-                          {m.role === 'user' && (
-                            <button
-                              className="copy-btn"
-                              onClick={() => startEdit(m.id, m.text)}
-                              disabled={running}
-                              title="Edit & resend"
-                            >✎</button>
-                          )}
-                          <button
-                            className={`copy-btn ${copiedId === m.id ? 'copied' : ''}`}
-                            onClick={() => copyMessage(m.id, m.text)}
-                            title="Copy to clipboard"
-                          >
-                            {copiedId === m.id ? '✓' : '⧉'}
-                          </button>
+                        )
+                      }
+                      const m = item.data
+                      const editing = editingId === m.id
+                      return (
+                        <div key={m.id} className={`msg-row ${m.role}`}
+                          role="article" aria-label={`${m.role} message`}>
+                          <div className={`av ${m.role}`} aria-hidden="true">{m.role === 'user' ? 'U' : '🤖'}</div>
+                          <div className="bubble-wrap">
+                            <div className="bubble">
+                              {editing ? (
+                                <div className="msg-edit">
+                                  <textarea
+                                    autoFocus
+                                    value={editValue}
+                                    onChange={e => setEditValue(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitEdit(m.id) }
+                                      if (e.key === 'Escape') { setEditingId(null); setEditValue('') }
+                                    }}
+                                    rows={Math.min(8, editValue.split('\n').length + 1)}
+                                    aria-label="Edit message"
+                                  />
+                                  <div className="msg-edit-actions">
+                                    <button className="btn secondary" onClick={() => { setEditingId(null); setEditValue('') }}
+                                      aria-label="Cancel edit">Cancel</button>
+                                    <button className="btn primary" onClick={() => commitEdit(m.id)} disabled={!editValue.trim()}
+                                      aria-label="Save and resend">Save &amp; resend</button>
+                                  </div>
+                                </div>
+                              ) : m.role === 'assistant' && !m.streaming
+                                ? <Markdown text={m.text} />
+                                : <span>{m.text}{m.streaming && <span className="cursor" role="status" aria-label="Streaming" />}</span>
+                              }
+                            </div>
+                            {!m.streaming && !editing && (
+                              <div className="msg-actions">
+                                {m.role === 'user' && (
+                                  <button
+                                    className="copy-btn"
+                                    onClick={() => startEdit(m.id, m.text)}
+                                    disabled={running}
+                                    title="Edit & resend"
+                                    aria-label="Edit and resend"
+                                  >✎</button>
+                                )}
+                                <button
+                                  className={`copy-btn ${copiedId === m.id ? 'copied' : ''}`}
+                                  onClick={() => copyMessage(m.id, m.text)}
+                                  title="Copy to clipboard"
+                                  aria-label="Copy message text"
+                                >
+                                  {copiedId === m.id ? '✓' : '⧉'}
+                                </button>
+                                <button
+                                  className="copy-btn"
+                                  onClick={() => branchFromHere(globalIdx)}
+                                  disabled={running || !activeId}
+                                  title="Branch from here"
+                                  aria-label="Branch conversation from this message"
+                                >⑂</button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  </div>
+                      )
+                    })}
+                    {bottomPad > 0 && <div style={{ height: bottomPad }} />}
+                  </>
                 )
-              })}
+              })()}
               {thinking && running && (
-                <div className="msg-row assistant">
-                  <div className="av assistant">🤖</div>
+                <div className="msg-row assistant" role="status" aria-label="Agent is thinking">
+                  <div className="av assistant" aria-hidden="true">🤖</div>
                   <div className="bubble-wrap">
                     <div className="bubble">
                       <span className="thinking-dots"><span /><span /><span /></span>
@@ -971,7 +1106,8 @@ export default function App() {
 
       {/* ── New conversation modal ── */}
       {showNew && (
-        <div className="overlay" onClick={e => e.target === e.currentTarget && setShowNew(false)}>
+        <div className="overlay" onClick={e => e.target === e.currentTarget && setShowNew(false)}
+          role="dialog" aria-modal="true" aria-label="New conversation">
           <div className="modal">
             <div className="modal-hd">
               <div className="modal-ico ico-new">💬</div>
@@ -999,7 +1135,7 @@ export default function App() {
 
       {/* ── Permission request modal ── */}
       {permReq && (
-        <div className="overlay">
+        <div className="overlay" role="dialog" aria-modal="true" aria-label="Permission request">
           <div className="modal">
             <div className="modal-hd">
               <div className="modal-ico ico-perm">🔐</div>
@@ -1049,7 +1185,7 @@ export default function App() {
 
       {/* ── Settings modal ── */}
       {showCfg && (
-        <div className="overlay">
+        <div className="overlay" role="dialog" aria-modal="true" aria-label="Settings">
           <div className="modal">
             <div className="modal-hd">
               <div className="modal-ico ico-cfg">⚙️</div>
@@ -1441,7 +1577,27 @@ export default function App() {
                   )}
                   <div className="field-hint">
                     Exports <code>agent.db</code> + <code>agent.key</code> as a <code>.tar.gz</code>.
-                    Keep the backup in a safe place — it contains your encryption key.
+                    Auto-backups are saved to <code>data/backups/</code> on exit (up to 7).
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label>Import Conversations</label>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="btn secondary" onClick={importConversation}
+                      aria-label="Import conversations from file"
+                    >Import conversations…</button>
+                    <button className="btn secondary" onClick={() => setImportMsg('')}
+                      aria-label="Dismiss import message"
+                      style={{ display: importMsg ? 'inline-block' : 'none' }}>✕</button>
+                  </div>
+                  {importMsg && (
+                    <div className="field-hint" style={{ color: importMsg.startsWith('✓') ? 'var(--green)' : 'var(--text2)' }}>
+                      {importMsg}
+                    </div>
+                  )}
+                  <div className="field-hint">
+                    Accepts <code>.json</code> from this app, ChatGPT <code>conversations.json</code>, or Claude exports.
                   </div>
                 </div>
 

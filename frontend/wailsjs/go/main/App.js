@@ -133,3 +133,11 @@ export function UpdateConversationPath(arg1) {
 export function WhisperAvailable() {
   return window['go']['main']['App']['WhisperAvailable']();
 }
+
+export function BranchConversation(arg1, arg2) {
+  return window['go']['main']['App']['BranchConversation'](arg1, arg2);
+}
+
+export function ImportConversation() {
+  return window['go']['main']['App']['ImportConversation']();
+}
