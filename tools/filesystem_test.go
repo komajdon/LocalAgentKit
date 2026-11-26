@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSafePathLexicalBoundary(t *testing.T) {
+func TestWorkspaceLexicalBoundary(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "work")
 	tests := []struct {
 		in string
@@ -21,8 +21,8 @@ func TestSafePathLexicalBoundary(t *testing.T) {
 		{filepath.Dir(root), false},
 	}
 	for _, tt := range tests {
-		if _, err := safePath(tt.in, root); (err == nil) != tt.ok {
-			t.Errorf("safePath(%q) err = %v, want ok=%v", tt.in, err, tt.ok)
+		if _, err := (workspace{dir: root}).rel(tt.in); (err == nil) != tt.ok {
+			t.Errorf("rel(%q) err = %v, want ok=%v", tt.in, err, tt.ok)
 		}
 	}
 }

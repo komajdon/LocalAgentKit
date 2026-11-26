@@ -21,17 +21,18 @@ func DefaultRegistryWithMCP(workDir string, mcpServers []config.MCPServerConfig)
 	return DefaultRegistryFull(workDir, mcpServers, SearchConfig{})
 }
 
-// DefaultRegistryFull builds the full tool registry including web-search configuration.
-func DefaultRegistryFull(workDir string, mcpServers []config.MCPServerConfig, search SearchConfig) *domain.ToolRegistry {
+// DefaultRegistryFull builds the full tool registry including web-search
+// configuration. The built-in tools refuse to touch the protected directories.
+func DefaultRegistryFull(workDir string, mcpServers []config.MCPServerConfig, search SearchConfig, protected ...string) *domain.ToolRegistry {
 	r := domain.NewToolRegistry()
-	r.Register(NewReadFile(workDir))
-	r.Register(NewWriteFile(workDir))
-	r.Register(NewListDir(workDir))
-	r.Register(NewSearchFiles(workDir))
-	r.Register(NewDeleteFile(workDir))
-	r.Register(NewShell(workDir))
+	r.Register(NewReadFile(workDir, protected...))
+	r.Register(NewWriteFile(workDir, protected...))
+	r.Register(NewListDir(workDir, protected...))
+	r.Register(NewSearchFiles(workDir, protected...))
+	r.Register(NewDeleteFile(workDir, protected...))
+	r.Register(NewShell(workDir, protected...))
 	r.Register(NewGetTime())
-	r.Register(NewReadDocument(workDir))
+	r.Register(NewReadDocument(workDir, protected...))
 	r.Register(NewWebSearch(search.Provider, search.APIKey))
 
 	for _, t := range LoadMCPTools(mcpServers) {

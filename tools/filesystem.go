@@ -2,6 +2,8 @@ package tools
 
 import (
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,34 +17,43 @@ const (
 	maxSearchHits  = 200
 )
 
-type readFileTool struct{ workDir string }
-type writeFileTool struct{ workDir string }
-type listDirTool struct{ workDir string }
-type searchFilesTool struct{ workDir string }
-type deleteFileTool struct{ workDir string }
+type readFileTool struct{ ws workspace }
+type writeFileTool struct{ ws workspace }
+type listDirTool struct{ ws workspace }
+type searchFilesTool struct{ ws workspace }
+type deleteFileTool struct{ ws workspace }
 
-func NewReadFile(workDir string) domain.Tool    { return &readFileTool{workDir} }
-func NewWriteFile(workDir string) domain.Tool   { return &writeFileTool{workDir} }
-func NewListDir(workDir string) domain.Tool     { return &listDirTool{workDir} }
-func NewSearchFiles(workDir string) domain.Tool { return &searchFilesTool{workDir} }
-func NewDeleteFile(workDir string) domain.Tool  { return &deleteFileTool{workDir} }
+// The protected arguments name directories the tool must never touch.
+func NewReadFile(workDir string, protected ...string) domain.Tool {
+	return &readFileTool{workspace{workDir, protected}}
+}
+func NewWriteFile(workDir string, protected ...string) domain.Tool {
+	return &writeFileTool{workspace{workDir, protected}}
+}
+func NewListDir(workDir string, protected ...string) domain.Tool {
+	return &listDirTool{workspace{workDir, protected}}
+}
+func NewSearchFiles(workDir string, protected ...string) domain.Tool {
+	return &searchFilesTool{workspace{workDir, protected}}
+}
+func NewDeleteFile(workDir string, protected ...string) domain.Tool {
+	return &deleteFileTool{workspace{workDir, protected}}
+}
 
 func (t *readFileTool) Name() string        { return "read_file" }
 func (t *readFileTool) Description() string { return "Read the contents of a file" }
 func (t *readFileTool) Parameters() string  { return `{"path": "absolute or relative file path"}` }
 func (t *readFileTool) Execute(args map[string]string) string {
-	path, err := safePath(args["path"], t.workDir)
+	f, size, err := t.ws.openRegular(args["path"])
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return "ERROR: " + err.Error()
+	defer func() { _ = f.Close() }()
+	if size > maxReadBytes {
+		return fmt.Sprintf("ERROR: file is too large (%d bytes). Max allowed is %d bytes.", size, maxReadBytes)
 	}
-	if info.Size() > maxReadBytes {
-		return fmt.Sprintf("ERROR: file is too large (%d bytes). Max allowed is %d bytes.", info.Size(), maxReadBytes)
-	}
-	data, err := os.ReadFile(path)
+	// The limit also holds if the file grows while it is read.
+	data, err := io.ReadAll(io.LimitReader(f, maxReadBytes))
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
@@ -57,17 +68,18 @@ func (t *writeFileTool) Parameters() string {
 	return `{"path": "file path", "content": "file content"}`
 }
 func (t *writeFileTool) Execute(args map[string]string) string {
-	path, err := safePath(args["path"], t.workDir)
+	root, rel, err := t.ws.open(args["path"])
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	defer func() { _ = root.Close() }()
+	if err := root.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
 		return "ERROR: " + err.Error()
 	}
-	if err := os.WriteFile(path, []byte(args["content"]), 0644); err != nil {
+	if err := root.WriteFile(rel, []byte(args["content"]), 0o644); err != nil {
 		return "ERROR: " + err.Error()
 	}
-	return fmt.Sprintf("Written %d bytes to %s", len(args["content"]), path)
+	return fmt.Sprintf("Written %d bytes to %s", len(args["content"]), filepath.Join(t.ws.dir, rel))
 }
 
 func (t *listDirTool) Name() string        { return "list_dir" }
@@ -78,13 +90,14 @@ func (t *listDirTool) Parameters() string {
 func (t *listDirTool) Execute(args map[string]string) string {
 	target := args["path"]
 	if target == "" {
-		target = t.workDir
+		target = t.ws.dir
 	}
-	path, err := safePath(target, t.workDir)
+	root, rel, err := t.ws.open(target)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
-	entries, err := os.ReadDir(path)
+	defer func() { _ = root.Close() }()
+	entries, err := fs.ReadDir(root.FS(), filepath.ToSlash(rel))
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
@@ -112,21 +125,14 @@ func (t *searchFilesTool) Parameters() string {
 func (t *searchFilesTool) Execute(args map[string]string) string {
 	dir := args["dir"]
 	if dir == "" {
-		dir = t.workDir
-	}
-	root, err := safePath(dir, t.workDir)
-	if err != nil {
-		return "ERROR: " + err.Error()
+		dir = t.ws.dir
 	}
 
 	ext := args["ext"]
 	pattern := strings.ToLower(args["pattern"])
 	var results []string
 
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
+	err := t.ws.walk(dir, func(path, rel string, info fs.FileInfo, root *os.Root) error {
 		if ext != "" && !strings.HasSuffix(path, ext) {
 			return nil
 		}
@@ -134,9 +140,9 @@ func (t *searchFilesTool) Execute(args map[string]string) string {
 			return nil // skip large files
 		}
 		if len(results) >= maxSearchHits {
-			return filepath.SkipAll
+			return fs.SkipAll
 		}
-		data, err := os.ReadFile(path)
+		data, err := root.ReadFile(rel)
 		if err != nil {
 			return nil
 		}
@@ -144,12 +150,15 @@ func (t *searchFilesTool) Execute(args map[string]string) string {
 			if strings.Contains(strings.ToLower(line), pattern) {
 				results = append(results, fmt.Sprintf("%s:%d: %s", path, i+1, strings.TrimSpace(line)))
 				if len(results) >= maxSearchHits {
-					return filepath.SkipAll
+					return fs.SkipAll
 				}
 			}
 		}
 		return nil
 	})
+	if err != nil {
+		return "ERROR: " + err.Error()
+	}
 
 	if len(results) == 0 {
 		return "No matches found."
@@ -165,14 +174,19 @@ func (t *deleteFileTool) Name() string        { return "delete_file" }
 func (t *deleteFileTool) Description() string { return "Delete a file" }
 func (t *deleteFileTool) Parameters() string  { return `{"path": "file path to delete"}` }
 func (t *deleteFileTool) Execute(args map[string]string) string {
-	path, err := safePath(args["path"], t.workDir)
+	root, rel, err := t.ws.open(args["path"])
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
-	if err := os.Remove(path); err != nil {
+	defer func() { _ = root.Close() }()
+	if rel == "." {
+		return "ERROR: refusing to delete the work directory itself"
+	}
+	// Remove deletes a symlink itself, never its target.
+	if err := root.Remove(rel); err != nil {
 		return "ERROR: " + err.Error()
 	}
-	return "Deleted: " + path
+	return "Deleted: " + filepath.Join(t.ws.dir, rel)
 }
 
 // resolve joins path with workDir if path is relative.
@@ -181,18 +195,4 @@ func resolve(path, workDir string) string {
 		return path
 	}
 	return filepath.Join(workDir, path)
-}
-
-// safePath resolves path relative to workDir and rejects traversal outside it.
-func safePath(path, workDir string) (string, error) {
-	if path == "" {
-		return "", fmt.Errorf("path is required")
-	}
-	abs := resolve(path, workDir)
-	abs = filepath.Clean(abs)
-	workDir = filepath.Clean(workDir)
-	if !strings.HasPrefix(abs, workDir+string(filepath.Separator)) && abs != workDir {
-		return "", fmt.Errorf("path %q is outside the allowed work directory", path)
-	}
-	return abs, nil
 }

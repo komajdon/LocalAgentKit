@@ -387,7 +387,7 @@ func (a *App) buildAgent(workDir string) *appLayer.ConversationalAgent {
 	registry := tools.DefaultRegistryFull(workDir, a.cfg.MCPServers, tools.SearchConfig{
 		Provider: a.cfg.SearchProvider,
 		APIKey:   a.cfg.SearchAPIKey,
-	})
+	}, store.DataDir())
 	agent := appLayer.NewConversationalAgent(a.cfg.Model, provider, registry, a.cfg.SystemPrompt, a.cfg.ContextLimit)
 
 	agent.OnChunk = func(chunk string) {

@@ -11,9 +11,11 @@ import (
 
 const shellTimeout = 5 * time.Minute
 
-type shellTool struct{ workDir string }
+type shellTool struct{ ws workspace }
 
-func NewShell(workDir string) domain.Tool { return &shellTool{workDir} }
+func NewShell(workDir string, protected ...string) domain.Tool {
+	return &shellTool{workspace{workDir, protected}}
+}
 
 func (t *shellTool) Name() string        { return "shell" }
 func (t *shellTool) Description() string { return "Run a shell command and return output" }
@@ -31,9 +33,12 @@ func (t *shellTool) Execute(args map[string]string) string {
 
 	dir := args["dir"]
 	if dir == "" {
-		dir = t.workDir
-	} else {
-		dir = resolve(dir, t.workDir)
+		dir = t.ws.dir
+	}
+	// This only constrains where the command starts, not what it can reach.
+	dir, err := t.ws.directory(dir)
+	if err != nil {
+		return "ERROR: " + err.Error()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), shellTimeout)

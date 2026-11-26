@@ -16,10 +16,12 @@ import (
 const maxDocBytes = 1 * 1024 * 1024 // 1 MB of extracted text
 
 // readDocumentTool extracts plain text from PDF and DOCX files.
-type readDocumentTool struct{ workDir string }
+type readDocumentTool struct{ ws workspace }
 
 // NewReadDocument builds the read_document tool, rooted at workDir for safety.
-func NewReadDocument(workDir string) domain.Tool { return &readDocumentTool{workDir} }
+func NewReadDocument(workDir string, protected ...string) domain.Tool {
+	return &readDocumentTool{workspace{workDir, protected}}
+}
 
 func (t *readDocumentTool) Name() string { return "read_document" }
 
@@ -32,18 +34,19 @@ func (t *readDocumentTool) Parameters() string {
 }
 
 func (t *readDocumentTool) Execute(args map[string]string) string {
-	abs, err := safePath(args["path"], t.workDir)
+	f, size, err := t.ws.openRegular(args["path"])
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
+	defer func() { _ = f.Close() }()
 
-	lower := strings.ToLower(abs)
+	lower := strings.ToLower(args["path"])
 	var text string
 	switch {
 	case strings.HasSuffix(lower, ".pdf"):
-		text, err = extractPDF(abs)
+		text, err = extractPDF(f, size)
 	case strings.HasSuffix(lower, ".docx"):
-		text, err = extractDOCX(abs)
+		text, err = extractDOCX(f, size)
 	default:
 		return "ERROR: unsupported file type — only .pdf and .docx are supported"
 	}
@@ -62,12 +65,17 @@ func (t *readDocumentTool) Execute(args map[string]string) string {
 }
 
 // extractPDF returns the document text with "--- Page N ---" markers per page.
-func extractPDF(path string) (string, error) {
-	f, r, err := pdf.Open(path)
+func extractPDF(f io.ReaderAt, size int64) (text string, err error) {
+	// The PDF library panics on some malformed files.
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("malformed PDF: %v", p)
+		}
+	}()
+	r, err := pdf.NewReader(f, size)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = f.Close() }()
 
 	var sb strings.Builder
 	total := r.NumPage()
@@ -91,12 +99,11 @@ func extractPDF(path string) (string, error) {
 
 // extractDOCX unzips the .docx and pulls text from word/document.xml,
 // inserting a blank line between paragraphs.
-func extractDOCX(path string) (string, error) {
-	zr, err := zip.OpenReader(path)
+func extractDOCX(f io.ReaderAt, size int64) (string, error) {
+	zr, err := zip.NewReader(f, size)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = zr.Close() }()
 
 	var docXML io.ReadCloser
 	for _, file := range zr.File {
