@@ -98,6 +98,9 @@ func (a *App) DeleteConversation(id string) error {
 		a.activeID = ""
 	}
 	a.mu.Unlock()
+	if err := a.forgetChanges(id); err != nil {
+		a.logf("could not remove the change journal: %v", err)
+	}
 	return history.Delete(id)
 }
 

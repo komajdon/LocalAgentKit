@@ -131,11 +131,16 @@ func (a *App) agentFor(cfg configSnapshot, profile ModelProfile, conv *history.C
 
 // registryFor builds the tools for a work directory. Without a pool there are
 // no MCP tools and no server is started.
-func (a *App) registryFor(ctx context.Context, cfg configSnapshot, workDir string, pool *tools.MCPPool) *domain.ToolRegistry {
+func (a *App) registryFor(ctx context.Context, cfg configSnapshot, workDir string, pool *tools.MCPPool, journal ...tools.Journal) *domain.ToolRegistry {
+	var record tools.Journal
+	if len(journal) > 0 {
+		record = journal[0]
+	}
 	return tools.NewRegistry(tools.Options{
 		WorkDir:    workDir,
 		MCPServers: cfg.MCPServers,
 		MCP:        pool,
+		Journal:    record,
 		Context:    ctx,
 		Search:     tools.SearchConfig{Provider: cfg.SearchProvider, APIKey: cfg.SearchAPIKey},
 		Sandbox:    sandboxOptions(cfg),
@@ -215,7 +220,7 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 
 	cfg := a.config()
 	profile := a.modelProfile(r.ctx, cfg, modelFor(cfg, prior))
-	agent := a.agentFor(cfg, profile, prior, a.registryFor(r.ctx, cfg, prior.WorkDir, a.mcp))
+	agent := a.agentFor(cfg, profile, prior, a.registryFor(r.ctx, cfg, prior.WorkDir, a.mcp, a.journalFor(r.convID, r.id)))
 	agent.OnChunk = func(chunk string) {
 		a.emitRun(r, "chat:chunk", chunk, func() { r.streaming.WriteString(chunk) })
 	}

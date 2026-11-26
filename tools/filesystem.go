@@ -19,17 +19,23 @@ const (
 )
 
 type readFileTool struct{ ws workspace }
-type writeFileTool struct{ ws workspace }
+type writeFileTool struct {
+	ws      workspace
+	journal Journal
+}
 type listDirTool struct{ ws workspace }
 type searchFilesTool struct{ ws workspace }
-type deleteFileTool struct{ ws workspace }
+type deleteFileTool struct {
+	ws      workspace
+	journal Journal
+}
 
 // The protected arguments name directories the tool must never touch.
 func NewReadFile(workDir string, protected ...string) domain.Tool {
 	return &readFileTool{workspace{workDir, protected}}
 }
 func NewWriteFile(workDir string, protected ...string) domain.Tool {
-	return &writeFileTool{workspace{workDir, protected}}
+	return &writeFileTool{ws: workspace{workDir, protected}}
 }
 func NewListDir(workDir string, protected ...string) domain.Tool {
 	return &listDirTool{workspace{workDir, protected}}
@@ -38,7 +44,7 @@ func NewSearchFiles(workDir string, protected ...string) domain.Tool {
 	return &searchFilesTool{workspace{workDir, protected}}
 }
 func NewDeleteFile(workDir string, protected ...string) domain.Tool {
-	return &deleteFileTool{workspace{workDir, protected}}
+	return &deleteFileTool{ws: workspace{workDir, protected}}
 }
 
 func (t *readFileTool) Name() string        { return "read_file" }
@@ -68,19 +74,15 @@ func (t *writeFileTool) Description() string {
 func (t *writeFileTool) Parameters() string {
 	return `{"path": "file path", "content": "file content"}`
 }
+
+// Execute plans and applies in one step; the agent calls Plan and Apply
+// separately so the change can be approved first.
 func (t *writeFileTool) Execute(ctx context.Context, args domain.Args) string {
-	root, rel, err := t.ws.open(args.String("path"))
+	plan, err := t.Plan(ctx, args)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
-	defer func() { _ = root.Close() }()
-	if err := root.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
-		return "ERROR: " + err.Error()
-	}
-	if err := root.WriteFile(rel, []byte(args.String("content")), 0o644); err != nil {
-		return "ERROR: " + err.Error()
-	}
-	return fmt.Sprintf("Written %d bytes to %s", len(args.String("content")), filepath.Join(t.ws.dir, rel))
+	return plan.Apply(ctx)
 }
 
 func (t *listDirTool) Name() string        { return "list_dir" }
@@ -178,19 +180,11 @@ func (t *deleteFileTool) Name() string        { return "delete_file" }
 func (t *deleteFileTool) Description() string { return "Delete a file" }
 func (t *deleteFileTool) Parameters() string  { return `{"path": "file path to delete"}` }
 func (t *deleteFileTool) Execute(ctx context.Context, args domain.Args) string {
-	root, rel, err := t.ws.open(args.String("path"))
+	plan, err := t.Plan(ctx, args)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
-	defer func() { _ = root.Close() }()
-	if rel == "." {
-		return "ERROR: refusing to delete the work directory itself"
-	}
-	// Remove deletes a symlink itself, never its target.
-	if err := root.Remove(rel); err != nil {
-		return "ERROR: " + err.Error()
-	}
-	return "Deleted: " + filepath.Join(t.ws.dir, rel)
+	return plan.Apply(ctx)
 }
 
 // resolve joins path with workDir if path is relative.

@@ -14,6 +14,8 @@ import {
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation,
   GetContextUsage, BranchConversation, ImportConversation,
 } from '../wailsjs/go/main/App'
+import { DiffView } from './components/DiffView'
+import { FileChanges } from './components/FileChanges'
 import { ToolTimeline } from './components/ToolTimeline'
 import { ModelSettingsPanel } from './components/ModelSettingsPanel'
 import { UsageDashboard } from './components/UsageDashboard'
@@ -33,7 +35,7 @@ interface SavedConv extends ConvMeta {
 interface PermReq {
   id: string; tool: string; description: string; args: Record<string, unknown>
   workspace: string; operation: string; target: string; impact: string
-  sensitive: boolean; scope: string
+  sensitive: boolean; scope: string; preview?: string
 }
 interface Grant { id: string; workspace: string; tool: string; label: string; scope: string }
 interface ToolInfo { name: string; description: string }
@@ -140,6 +142,7 @@ export default function App() {
   // The single run may belong to a conversation other than the one shown.
   const [showUsage, setShowUsage] = useState(false)
   const [showTimeline, setShowTimeline] = useState(false)
+  const [showChanges, setShowChanges] = useState(false)
   const [convLimit, setConvLimit] = useState(CONV_PAGE)
   const [runConv, setRunConv] = useState<string | null>(null)
   const running = runConv !== null && runConv === activeId
@@ -974,6 +977,7 @@ export default function App() {
             <>
               <button className="foot-btn" onClick={() => setShowUsage(true)}>📊 Usage</button>
             <button className="foot-btn" onClick={() => setShowTimeline(true)} disabled={!activeId}>🧭 Tool timeline</button>
+            <button className="foot-btn" onClick={() => setShowChanges(true)} disabled={!activeId}>📝 File changes</button>
               <button className="foot-btn" onClick={() => { setShowCfg(true); setCfgTab('general') }}
                 aria-label="Settings">⚙️ Settings</button>
               <div className="conn-badge">
@@ -1271,6 +1275,8 @@ export default function App() {
       {/* ── Permission request modal ── */}
       {showTimeline && activeId && <ToolTimeline conversationId={activeId} onClose={() => setShowTimeline(false)} />}
 
+      {showChanges && activeId && <FileChanges conversationId={activeId} onClose={() => setShowChanges(false)} />}
+
       {showUsage && <UsageDashboard conversations={convList} onClose={() => setShowUsage(false)} />}
 
       {permReq && (
@@ -1297,6 +1303,12 @@ export default function App() {
                   <div className="perm-kv">
                     <div className="perm-key">Target</div>
                     <pre className="arg-shell-cmd">{permReq.target}</pre>
+                  </div>
+                )}
+                {permReq.preview && (
+                  <div className="perm-kv">
+                    <div className="perm-key">Change to be made</div>
+                    <DiffView diff={permReq.preview} />
                   </div>
                 )}
                 <div className="perm-kv">

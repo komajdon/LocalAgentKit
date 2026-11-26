@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ type pendingCall struct {
 	tool    domain.Tool
 	result  string
 	execute bool
+	// apply, set for planned changes, replaces the tool's Execute.
+	apply func(context.Context) string
 
 	id         string
 	status     string // final state of a call that is not executed
@@ -30,6 +33,8 @@ type PermissionRequest struct {
 	// ExternalContent is true when the conversation holds output from the web,
 	// a document or an MCP server, which may carry injected instructions.
 	ExternalContent bool `json:"external_content"`
+	// Preview shows the change that would be made, for tools that can tell.
+	Preview string `json:"preview"`
 	// Outcome may be set by the checker to say how the call was decided.
 	Outcome *string `json:"-"`
 }

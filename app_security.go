@@ -45,6 +45,7 @@ type PermissionPrompt struct {
 	Workspace   string      `json:"workspace"`
 	// ConversationID is the conversation whose run is asking.
 	ConversationID string `json:"conversation_id"`
+	Preview        string `json:"preview"`
 	permission.Details
 }
 
@@ -94,6 +95,7 @@ func (a *App) authorize(ctx context.Context, conversationID, workspace string, r
 	a.emit("chat:permission_request", PermissionPrompt{
 		ID: pending.id, Tool: req.Tool, Description: req.Description,
 		Args: req.Args, Workspace: workspace, Details: details, ConversationID: conversationID,
+		Preview: req.Preview,
 	})
 
 	var scope permission.Scope

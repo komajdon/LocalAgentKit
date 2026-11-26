@@ -27,6 +27,8 @@ export function GetConfig():Promise<config.Config>;
 
 export function GetContextUsage():Promise<app.ContextUsage>;
 
+export function GetGitStatus(arg1:string):Promise<main.GitStatus>;
+
 export function GetKeyLocation():Promise<string>;
 
 export function GetMCPStatus():Promise<Array<tools.MCPStatus>>;
@@ -52,6 +54,8 @@ export function ImportBackup(arg1:string):Promise<string>;
 export function ImportConversation():Promise<string>;
 
 export function ListConversations():Promise<Array<history.ConvMeta>>;
+
+export function ListFileChanges(arg1:string):Promise<Array<main.FileChange>>;
 
 export function ListMCPServers():Promise<Array<config.MCPServerConfig>>;
 
@@ -112,6 +116,8 @@ export function TestConnection():Promise<main.ConnectionResult>;
 export function TranscribeAudio(arg1:Array<number>):Promise<string>;
 
 export function TruncateAndResend(arg1:string,arg2:number,arg3:string):Promise<main.ChatResponse>;
+
+export function UndoFileChange(arg1:string):Promise<string>;
 
 export function UpdateConversationPath(arg1:string):Promise<void>;
 

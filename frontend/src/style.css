@@ -1219,3 +1219,7 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible), select:focus:
 .timeline-status { font-weight: 700; }
 .timeline-status.succeeded { color: var(--green); }
 .timeline-status.failed, .timeline-status.denied, .timeline-status.rejected { color: var(--red); }
+.diff-view { font-size: 11px; max-height: 260px; overflow: auto; white-space: pre-wrap; background: var(--surface2); border-radius: 6px; padding: 8px; color: var(--text); }
+.diff-view .add { color: var(--green); }
+.diff-view .del { color: var(--red); }
+.diff-view .head { color: var(--text2); }

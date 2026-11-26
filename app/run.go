@@ -247,9 +247,20 @@ func (a *ConversationalAgent) collectCalls(ctx context.Context, calls []domain.T
 			continue
 		}
 		tc.Args = args
+		preview := ""
+		if planner, ok := tool.(domain.Planner); ok {
+			// Planned before the prompt: what is shown is what gets applied.
+			plan, err := planner.Plan(ctx, tc.Args)
+			if err != nil {
+				p.result = "ERROR: " + err.Error()
+				continue
+			}
+			preview, p.apply = plan.Preview, plan.Apply
+		}
 		if a.OnPermissionRequest != nil {
 			allowed := a.OnPermissionRequest(PermissionRequest{
 				Outcome:         &p.permission,
+				Preview:         preview,
 				Tool:            tc.Tool,
 				Description:     tool.Description(),
 				Args:            tc.Args,
@@ -311,7 +322,11 @@ func (a *ConversationalAgent) execute(ctx context.Context, pending []*pendingCal
 			}
 			toolCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			p.result = p.tool.Execute(toolCtx, p.tc.Args)
+			if p.apply != nil {
+				p.result = p.apply(toolCtx)
+			} else {
+				p.result = p.tool.Execute(toolCtx, p.tc.Args)
+			}
 		}(p)
 	}
 	wg.Wait()

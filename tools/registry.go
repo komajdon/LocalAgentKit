@@ -26,6 +26,8 @@ type Options struct {
 	Search     SearchConfig
 	Sandbox    sandbox.Options // isolation for the shell tool
 	Protected  []string        // directories no built-in tool may touch
+	// Journal records the file tools' changes.
+	Journal Journal
 	// MCP provides the servers' tools; without it MCPServers is ignored.
 	MCP *MCPPool
 	// Context bounds starting MCP servers.
@@ -36,10 +38,10 @@ type Options struct {
 func NewRegistry(o Options) *domain.ToolRegistry {
 	r := domain.NewToolRegistry()
 	r.Register(NewReadFile(o.WorkDir, o.Protected...))
-	r.Register(NewWriteFile(o.WorkDir, o.Protected...))
+	r.Register(&writeFileTool{ws: workspace{o.WorkDir, o.Protected}, journal: o.Journal})
 	r.Register(NewListDir(o.WorkDir, o.Protected...))
 	r.Register(NewSearchFiles(o.WorkDir, o.Protected...))
-	r.Register(NewDeleteFile(o.WorkDir, o.Protected...))
+	r.Register(&deleteFileTool{ws: workspace{o.WorkDir, o.Protected}, journal: o.Journal})
 	r.Register(NewShell(o.WorkDir, o.Sandbox, o.Protected...))
 	r.Register(NewGetTime())
 	r.Register(NewReadDocument(o.WorkDir, o.Protected...))

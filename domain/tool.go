@@ -191,3 +191,17 @@ func (a *Args) UnmarshalJSON(data []byte) error {
 	*a = m
 	return nil
 }
+
+// Plan is a change a tool has worked out but not yet made.
+type Plan struct {
+	// Preview shows what would change, for the user to approve.
+	Preview string
+	// Apply makes the change. It refuses if what the preview was based on has
+	// changed since.
+	Apply func(ctx context.Context) string
+}
+
+// Planner is a tool whose effect can be previewed.
+type Planner interface {
+	Plan(ctx context.Context, args Args) (Plan, error)
+}

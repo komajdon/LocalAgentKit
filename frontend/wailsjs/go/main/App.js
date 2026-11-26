@@ -38,6 +38,10 @@ export function GetContextUsage() {
   return window['go']['main']['App']['GetContextUsage']();
 }
 
+export function GetGitStatus(arg1) {
+  return window['go']['main']['App']['GetGitStatus'](arg1);
+}
+
 export function GetKeyLocation() {
   return window['go']['main']['App']['GetKeyLocation']();
 }
@@ -88,6 +92,10 @@ export function ImportConversation() {
 
 export function ListConversations() {
   return window['go']['main']['App']['ListConversations']();
+}
+
+export function ListFileChanges(arg1) {
+  return window['go']['main']['App']['ListFileChanges'](arg1);
 }
 
 export function ListMCPServers() {
@@ -208,6 +216,10 @@ export function TranscribeAudio(arg1) {
 
 export function TruncateAndResend(arg1, arg2, arg3) {
   return window['go']['main']['App']['TruncateAndResend'](arg1, arg2, arg3);
+}
+
+export function UndoFileChange(arg1) {
+  return window['go']['main']['App']['UndoFileChange'](arg1);
 }
 
 export function UpdateConversationPath(arg1) {
