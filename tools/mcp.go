@@ -14,6 +14,7 @@ import (
 
 	"agent-gui/domain"
 	"agent-gui/internal/config"
+	"agent-gui/internal/redact"
 )
 
 const mcpCallTimeout = 30 * time.Second
@@ -361,7 +362,7 @@ func (t *mcpTool) Execute(args map[string]string) string {
 	}
 	result, err := t.client.CallTool(t.def.Name, anyArgs)
 	if err != nil {
-		return "MCP call failed: " + err.Error()
+		return "MCP call failed: " + redact.String(err.Error())
 	}
 	return result
 }
@@ -402,14 +403,14 @@ func LoadMCPTools(servers []config.MCPServerConfig) []domain.Tool {
 		}
 		client, err := startMCPClient(srv)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "MCP: failed to start %q: %v\n", srv.Name, err)
+			fmt.Fprintf(os.Stderr, "MCP: failed to start %q: %v\n", srv.Name, redact.Error(err))
 			continue
 		}
 		newClients = append(newClients, client)
 
 		defs, err := client.ListTools()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "MCP: failed to list tools for %q: %v\n", srv.Name, err)
+			fmt.Fprintf(os.Stderr, "MCP: failed to list tools for %q: %v\n", srv.Name, redact.Error(err))
 			client.close()
 			newClients = newClients[:len(newClients)-1]
 			continue
@@ -436,13 +437,13 @@ func LoadMCPTools(servers []config.MCPServerConfig) []domain.Tool {
 func ProbeMCPServer(cfg config.MCPServerConfig) ([]string, error) {
 	client, err := startMCPClient(cfg)
 	if err != nil {
-		return nil, err
+		return nil, redact.Error(err)
 	}
 	defer client.close()
 
 	defs, err := client.ListTools()
 	if err != nil {
-		return nil, err
+		return nil, redact.Error(err)
 	}
 	names := make([]string, len(defs))
 	for i, d := range defs {

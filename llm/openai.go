@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"agent-gui/domain"
+	"agent-gui/internal/redact"
 )
 
 type openAIMessage struct {
@@ -80,7 +81,8 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, model string, messages 
 		result, usage, e = p.chatStream(ctx, model, messages, onChunk)
 		return e
 	})
-	return result, usage, err
+	// Provider replies and URLs can echo credentials.
+	return result, usage, redact.Error(err, p.apiKey)
 }
 
 func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, *domain.Usage, error) {
@@ -153,6 +155,11 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 }
 
 func (p *OpenAIProvider) ListModels() ([]string, error) {
+	names, err := p.listModels()
+	return names, redact.Error(err, p.apiKey)
+}
+
+func (p *OpenAIProvider) listModels() ([]string, error) {
 	req, err := http.NewRequest(http.MethodGet, p.baseURL+"/models", nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)

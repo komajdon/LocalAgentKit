@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"agent-gui/domain"
+	"agent-gui/internal/redact"
 )
 
 const (
@@ -81,7 +82,7 @@ func (t *webSearchTool) Execute(args map[string]string) string {
 		results, err = t.searchDuckDuckGo(ctx, query, count)
 	}
 	if err != nil {
-		return fmt.Sprintf("ERROR: web search failed: %v", err)
+		return fmt.Sprintf("ERROR: web search failed: %v", redact.Error(err, t.apiKey))
 	}
 	if len(results) == 0 {
 		return "No results found for: " + query

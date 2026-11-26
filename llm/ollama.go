@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"agent-gui/domain"
+	"agent-gui/internal/redact"
 )
 
 type ollamaMessage struct {
@@ -57,7 +58,8 @@ func (p *OllamaProvider) ChatStream(ctx context.Context, model string, messages 
 		result, usage, e = p.chatStream(ctx, model, messages, onChunk)
 		return e
 	})
-	return result, usage, err
+	// A base URL may carry a password.
+	return result, usage, redact.Error(err)
 }
 
 func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, *domain.Usage, error) {
@@ -124,6 +126,11 @@ func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages 
 }
 
 func (p *OllamaProvider) ListModels() ([]string, error) {
+	names, err := p.listModels()
+	return names, redact.Error(err)
+}
+
+func (p *OllamaProvider) listModels() ([]string, error) {
 	resp, err := p.client.Get(p.host + "/api/tags")
 	if err != nil {
 		return nil, fmt.Errorf("connection failed: %w", err)
