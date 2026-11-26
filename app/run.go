@@ -49,12 +49,7 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			return ctx.Err()
 		}
 
-		// Trim history if context limit is set.
-		if a.contextLimit > 0 {
-			a.trimToContextLimit()
-		}
-
-		response, usage, err := a.provider.ChatStream(ctx, a.model, a.conv.Full(), func(chunk string) {
+		response, usage, err := a.provider.ChatStream(ctx, a.model, a.window(), func(chunk string) {
 			if a.OnChunk != nil {
 				a.OnChunk(chunk)
 			}

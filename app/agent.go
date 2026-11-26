@@ -91,15 +91,9 @@ func (a *ConversationalAgent) InjectMessage(role domain.Role, content string) {
 // Messages returns the current conversation history (excluding the system prompt).
 func (a *ConversationalAgent) Messages() []domain.Message { return a.conv.History() }
 
-// TokenCount returns an approximate token count for all messages including the system prompt.
-// Uses the rough heuristic of 1 token ≈ 4 characters.
-func (a *ConversationalAgent) TokenCount() int {
-	total := len(a.conv.SystemPrompt)
-	for _, m := range a.conv.Full() {
-		total += len(m.Content)
-	}
-	return total / 4
-}
+// TokenCount estimates the tokens the next request would use: the system
+// prompt, counted once, plus the messages that fit the context window.
+func (a *ConversationalAgent) TokenCount() int { return estimateTokens(a.window()) }
 
 // recordUsage folds one provider usage report into the running totals.
 func (a *ConversationalAgent) recordUsage(u *domain.Usage) {
@@ -151,19 +145,6 @@ func (a *ConversationalAgent) emitContextUsage() {
 		return
 	}
 	a.OnContextUsage(a.CurrentUsage())
-}
-
-// trimToContextLimit drops the oldest non-system messages (pairs if possible)
-// until the token count is under 90% of the limit.
-func (a *ConversationalAgent) trimToContextLimit() {
-	limit := a.contextLimit
-	target := limit * 90 / 100
-	history := a.conv.History()
-	for a.TokenCount() > target && len(history) > 2 {
-		// Remove the oldest message.
-		a.conv.SetHistory(history[1:])
-		history = a.conv.History()
-	}
 }
 
 // buildSystemPrompt generates the tool-use instructions from the registry.
