@@ -29,6 +29,19 @@ var scratch = sync.OnceValues(func() (string, error) {
 	return filepath.EvalSymlinks(dir)
 })
 
+// shims holds the helper programs. It is separate from scratch so commands
+// cannot replace a helper that a later command would run.
+var shims = sync.OnceValues(func() (string, error) {
+	dir, err := os.MkdirTemp("", "lak-shims-*")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "mktemp"), []byte(mktempShim("/usr/bin/mktemp")), 0o700); err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(dir)
+})
+
 func wrap(o Options, _ string, argv []string) (string, []string, error) {
 	work, err := filepath.EvalSymlinks(o.WorkDir)
 	if err != nil {
@@ -45,6 +58,10 @@ func wrap(o Options, _ string, argv []string) (string, []string, error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("sandbox temporary directory: %w", err)
 	}
+	helpers, err := shims()
+	if err != nil {
+		return "", nil, fmt.Errorf("sandbox helpers: %w", err)
+	}
 	var hidden []string
 	for _, h := range o.Hidden {
 		if resolved, err := filepath.EvalSymlinks(h); err == nil {
@@ -54,7 +71,7 @@ func wrap(o Options, _ string, argv []string) (string, []string, error) {
 	rel, err := filepath.Rel(work, home)
 	homeVisible := err == nil && filepath.IsLocal(rel)
 
-	args := darwinProfile(work, home, tmp, hidden, o.AllowNetwork)
-	args = append(args, darwinEnv(tmp, homeVisible)...)
+	args := darwinProfile(work, home, tmp, helpers, hidden, o.AllowNetwork)
+	args = append(args, darwinEnv(tmp, helpers, os.Getenv("PATH"), homeVisible)...)
 	return sandboxExec, append(args, argv...), nil
 }

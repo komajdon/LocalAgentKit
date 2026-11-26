@@ -131,9 +131,13 @@ Nothing else was measured.
 After the owner pushed the branch, the macOS test job failed twice: the sandbox
 profile left temporary directories readable and writable, and git could not run
 because the hidden home returned "operation not permitted". Both are fixed
-locally and covered by profile-rule tests that run on Linux. **The fixed profile
-is UNVERIFIED on macOS** until the job runs again. Results of the other jobs
-were not reported.
+locally and covered by profile-rule tests that run on Linux. The next run
+confirmed both on macOS.
+
+That run showed two more problems: macOS `mktemp` ignores `TMPDIR` and was
+refused (now wrapped), and on Windows two tests assumed Unix behaviour (git
+line-ending settings and permission bits). **These latest fixes are UNVERIFIED
+on macOS and Windows** until the jobs run again.
 
 ## UNVERIFIED
 

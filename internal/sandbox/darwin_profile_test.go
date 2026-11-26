@@ -7,7 +7,7 @@ import (
 )
 
 func TestDarwinProfileRules(t *testing.T) {
-	args := darwinProfile("/w", "/Users/u", "/s", []string{`/w/app "data"`}, false)
+	args := darwinProfile("/w", "/Users/u", "/s", "/shims", []string{`/w/app "data"`}, false)
 	profile := args[len(args)-1]
 	// Order matters: each allow must follow the deny it carves an exception from,
 	// and the protected directories must follow every allow.
@@ -24,6 +24,9 @@ func TestDarwinProfileRules(t *testing.T) {
 		last = i
 	}
 	writable := profile[strings.Index(profile, "(allow file-write*"):strings.Index(profile, "(deny file-read*")]
+	if strings.Contains(writable, "SHIMS") {
+		t.Errorf("helpers must not be writable: %s", writable)
+	}
 	if strings.Contains(writable, "/private") {
 		t.Errorf("shared temporary directories must not be writable: %s", writable)
 	}
@@ -36,16 +39,17 @@ func TestDarwinProfileRules(t *testing.T) {
 	if strings.Contains(profile, "app ") || !slices.Contains(args, `HIDDEN0=/w/app "data"`) {
 		t.Error("a path was spliced into the profile")
 	}
-	if p := darwinProfile("/w", "/h", "/s", nil, true); strings.Contains(p[len(p)-1], "network") {
+	if p := darwinProfile("/w", "/h", "/s", "/shims", nil, true); strings.Contains(p[len(p)-1], "network") {
 		t.Error("network denied although allowed")
 	}
 }
 
 func TestDarwinEnvMovesHomeOnlyWhenHidden(t *testing.T) {
-	if got := darwinEnv("/s", false); !slices.Equal(got, []string{"/usr/bin/env", "TMPDIR=/s", "HOME=/s"}) {
+	base := []string{"/usr/bin/env", "TMPDIR=/s", "PATH=/shims:/usr/bin"}
+	if got := darwinEnv("/s", "/shims", "/usr/bin", false); !slices.Equal(got, append(slices.Clone(base), "HOME=/s")) {
 		t.Errorf("hidden home: %v", got)
 	}
-	if got := darwinEnv("/s", true); !slices.Equal(got, []string{"/usr/bin/env", "TMPDIR=/s"}) {
+	if got := darwinEnv("/s", "/shims", "/usr/bin", true); !slices.Equal(got, base) {
 		t.Errorf("visible home: %v", got)
 	}
 }

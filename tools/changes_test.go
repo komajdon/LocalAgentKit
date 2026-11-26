@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -62,7 +63,8 @@ func TestPlanApplyUndo(t *testing.T) {
 	if body(file) != "one\ntwo\n" || body(filepath.Join(dir, "new/g.txt")) != "<missing>" {
 		t.Fatalf("after undo: %q", body(file))
 	}
-	if info, _ := os.Stat(file); info.Mode().Perm() != 0o600 {
+	// Windows has no Unix permission bits to restore.
+	if info, _ := os.Stat(file); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %v", info.Mode())
 	}
 }
