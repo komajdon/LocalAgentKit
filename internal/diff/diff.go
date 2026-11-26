@@ -139,7 +139,8 @@ func hunks(ops []op, old, new string) string {
 		}
 		i = end
 	}
-	if strings.HasSuffix(old, "\n") != strings.HasSuffix(new, "\n") {
+	// A file being created or emptied has no earlier ending to compare with.
+	if old != "" && new != "" && strings.HasSuffix(old, "\n") != strings.HasSuffix(new, "\n") {
 		out.WriteString("\\ The newline at end of file differs\n")
 	}
 	return out.String()

@@ -50,6 +50,11 @@ func TestUnifiedSummaries(t *testing.T) {
 	if got := Unified("f", big, strings.Repeat("b\n", 3000)); !strings.Contains(got, "too large") {
 		t.Fatal(got[:80])
 	}
+	for _, tc := range [][2]string{{"", "a\n"}, {"a\n", ""}} {
+		if got := Unified("f", tc[0], tc[1]); strings.Contains(got, "newline") {
+			t.Fatal(got)
+		}
+	}
 	if got := Unified("f", "same", "same"); !strings.Contains(got, "no change") {
 		t.Fatal(got)
 	}
