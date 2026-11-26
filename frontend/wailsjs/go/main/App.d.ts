@@ -8,12 +8,17 @@ import {tools} from '../models';
 import {sandbox} from '../models';
 import {usage} from '../models';
 import {permission} from '../models';
+import {profile} from '../models';
 
 export function BranchConversation(arg1:string,arg2:number):Promise<history.Conversation>;
 
 export function CheckForUpdate():Promise<main.UpdateInfo>;
 
 export function DeleteConversation(arg1:string):Promise<void>;
+
+export function DeleteProfile(arg1:string):Promise<string>;
+
+export function DeleteWorkspace(arg1:string):Promise<string>;
 
 export function DescribeModel(arg1:string):Promise<main.ModelProfile>;
 
@@ -63,7 +68,11 @@ export function ListModels():Promise<main.ModelList>;
 
 export function ListPermissionGrants():Promise<Array<permission.Grant>>;
 
+export function ListProfiles():Promise<Array<profile.Profile>>;
+
 export function ListTools():Promise<Array<main.ToolInfo>>;
+
+export function ListWorkspaces():Promise<Array<profile.Workspace>>;
 
 export function LoadConversation(arg1:string):Promise<main.ConversationView>;
 
@@ -72,6 +81,8 @@ export function NewConversation(arg1:string):Promise<history.Conversation>;
 export function PickDirectory():Promise<string>;
 
 export function ProbeMCPServer(arg1:config.MCPServerConfig):Promise<Array<string>>;
+
+export function RecentWorkDirs():Promise<Array<string>>;
 
 export function RefreshModels():Promise<main.ModelList>;
 
@@ -91,7 +102,11 @@ export function SaveMCPServers(arg1:Array<config.MCPServerConfig>):Promise<strin
 
 export function SaveModelSettings(arg1:main.ModelSettings):Promise<string>;
 
+export function SaveProfile(arg1:profile.Profile):Promise<string>;
+
 export function SaveUsageSettings(arg1:usage.Settings):Promise<string>;
+
+export function SaveWorkspace(arg1:profile.Workspace):Promise<string>;
 
 export function SearchConversations(arg1:string):Promise<Array<history.ConvMeta>>;
 
@@ -100,6 +115,8 @@ export function SendMessage(arg1:string,arg2:string):Promise<main.ChatResponse>;
 export function SetConversationModel(arg1:string):Promise<void>;
 
 export function SetConversationPinned(arg1:string,arg2:boolean):Promise<void>;
+
+export function SetConversationProfile(arg1:string,arg2:string):Promise<void>;
 
 export function SetConversationTags(arg1:string,arg2:Array<string>):Promise<void>;
 

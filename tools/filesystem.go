@@ -32,19 +32,19 @@ type deleteFileTool struct {
 
 // The protected arguments name directories the tool must never touch.
 func NewReadFile(workDir string, protected ...string) domain.Tool {
-	return &readFileTool{workspace{workDir, protected}}
+	return &readFileTool{workspace{dir: workDir, protected: protected}}
 }
 func NewWriteFile(workDir string, protected ...string) domain.Tool {
-	return &writeFileTool{ws: workspace{workDir, protected}}
+	return &writeFileTool{ws: workspace{dir: workDir, protected: protected}}
 }
 func NewListDir(workDir string, protected ...string) domain.Tool {
-	return &listDirTool{workspace{workDir, protected}}
+	return &listDirTool{workspace{dir: workDir, protected: protected}}
 }
 func NewSearchFiles(workDir string, protected ...string) domain.Tool {
-	return &searchFilesTool{workspace{workDir, protected}}
+	return &searchFilesTool{workspace{dir: workDir, protected: protected}}
 }
 func NewDeleteFile(workDir string, protected ...string) domain.Tool {
-	return &deleteFileTool{ws: workspace{workDir, protected}}
+	return &deleteFileTool{ws: workspace{dir: workDir, protected: protected}}
 }
 
 func (t *readFileTool) Name() string        { return "read_file" }
@@ -106,6 +106,9 @@ func (t *listDirTool) Execute(ctx context.Context, args domain.Args) string {
 	}
 	var sb strings.Builder
 	for _, e := range entries {
+		if t.ws.isIgnored(filepath.Join(rel, e.Name())) {
+			continue
+		}
 		if e.IsDir() {
 			sb.WriteString("[DIR]  " + e.Name() + "\n")
 		} else {

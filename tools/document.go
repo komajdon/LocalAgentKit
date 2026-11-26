@@ -21,7 +21,7 @@ type readDocumentTool struct{ ws workspace }
 
 // NewReadDocument builds the read_document tool, rooted at workDir for safety.
 func NewReadDocument(workDir string, protected ...string) domain.Tool {
-	return &readDocumentTool{workspace{workDir, protected}}
+	return &readDocumentTool{workspace{dir: workDir, protected: protected}}
 }
 
 func (t *readDocumentTool) Name() string { return "read_document" }

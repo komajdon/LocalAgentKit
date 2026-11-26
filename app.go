@@ -199,6 +199,7 @@ func (a *App) BranchConversation(id string, displayItemIndex int) (*history.Conv
 			Title:     src.Title + " (branch)",
 			WorkDir:   src.WorkDir,
 			Model:     src.Model,
+			ProfileID: src.ProfileID,
 			CreatedAt: now,
 			UpdatedAt: now,
 		},

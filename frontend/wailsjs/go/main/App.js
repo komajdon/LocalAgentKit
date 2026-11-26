@@ -14,6 +14,14 @@ export function DeleteConversation(arg1) {
   return window['go']['main']['App']['DeleteConversation'](arg1);
 }
 
+export function DeleteProfile(arg1) {
+  return window['go']['main']['App']['DeleteProfile'](arg1);
+}
+
+export function DeleteWorkspace(arg1) {
+  return window['go']['main']['App']['DeleteWorkspace'](arg1);
+}
+
 export function DescribeModel(arg1) {
   return window['go']['main']['App']['DescribeModel'](arg1);
 }
@@ -110,8 +118,16 @@ export function ListPermissionGrants() {
   return window['go']['main']['App']['ListPermissionGrants']();
 }
 
+export function ListProfiles() {
+  return window['go']['main']['App']['ListProfiles']();
+}
+
 export function ListTools() {
   return window['go']['main']['App']['ListTools']();
+}
+
+export function ListWorkspaces() {
+  return window['go']['main']['App']['ListWorkspaces']();
 }
 
 export function LoadConversation(arg1) {
@@ -128,6 +144,10 @@ export function PickDirectory() {
 
 export function ProbeMCPServer(arg1) {
   return window['go']['main']['App']['ProbeMCPServer'](arg1);
+}
+
+export function RecentWorkDirs() {
+  return window['go']['main']['App']['RecentWorkDirs']();
 }
 
 export function RefreshModels() {
@@ -166,8 +186,16 @@ export function SaveModelSettings(arg1) {
   return window['go']['main']['App']['SaveModelSettings'](arg1);
 }
 
+export function SaveProfile(arg1) {
+  return window['go']['main']['App']['SaveProfile'](arg1);
+}
+
 export function SaveUsageSettings(arg1) {
   return window['go']['main']['App']['SaveUsageSettings'](arg1);
+}
+
+export function SaveWorkspace(arg1) {
+  return window['go']['main']['App']['SaveWorkspace'](arg1);
 }
 
 export function SearchConversations(arg1) {
@@ -184,6 +212,10 @@ export function SetConversationModel(arg1) {
 
 export function SetConversationPinned(arg1, arg2) {
   return window['go']['main']['App']['SetConversationPinned'](arg1, arg2);
+}
+
+export function SetConversationProfile(arg1, arg2) {
+  return window['go']['main']['App']['SetConversationProfile'](arg1, arg2);
 }
 
 export function SetConversationTags(arg1, arg2) {

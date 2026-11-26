@@ -26,6 +26,8 @@ type Options struct {
 	Search     SearchConfig
 	Sandbox    sandbox.Options // isolation for the shell tool
 	Protected  []string        // directories no built-in tool may touch
+	// Ignore holds workspace patterns the file tools must not list or open.
+	Ignore []string
 	// Journal records the file tools' changes.
 	Journal Journal
 	// MCP provides the servers' tools; without it MCPServers is ignored.
@@ -37,14 +39,15 @@ type Options struct {
 // NewRegistry builds a registry of the built-in and MCP tools.
 func NewRegistry(o Options) *domain.ToolRegistry {
 	r := domain.NewToolRegistry()
-	r.Register(NewReadFile(o.WorkDir, o.Protected...))
-	r.Register(&writeFileTool{ws: workspace{o.WorkDir, o.Protected}, journal: o.Journal})
-	r.Register(NewListDir(o.WorkDir, o.Protected...))
-	r.Register(NewSearchFiles(o.WorkDir, o.Protected...))
-	r.Register(&deleteFileTool{ws: workspace{o.WorkDir, o.Protected}, journal: o.Journal})
+	files := workspace{dir: o.WorkDir, protected: o.Protected, ignore: o.Ignore}
+	r.Register(&readFileTool{files})
+	r.Register(&writeFileTool{ws: files, journal: o.Journal})
+	r.Register(&listDirTool{files})
+	r.Register(&searchFilesTool{files})
+	r.Register(&deleteFileTool{ws: files, journal: o.Journal})
 	r.Register(NewShell(o.WorkDir, o.Sandbox, o.Protected...))
 	r.Register(NewGetTime())
-	r.Register(NewReadDocument(o.WorkDir, o.Protected...))
+	r.Register(&readDocumentTool{files})
 	r.Register(NewWebSearch(o.Search.Provider, o.Search.APIKey))
 
 	if o.MCP != nil {

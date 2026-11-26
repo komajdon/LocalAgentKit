@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"agent-gui/internal/profile"
 )
 
 // workspace confines file access to one directory.
@@ -20,6 +22,29 @@ import (
 type workspace struct {
 	dir       string
 	protected []string
+	ignore    []string // patterns of paths that must not be listed or opened
+}
+
+var errIgnored = errors.New("path is excluded by the workspace's ignore patterns")
+
+// isIgnored checks the path as given and, if it is a link, where it points.
+func (w workspace) isIgnored(rel string) bool {
+	if len(w.ignore) == 0 {
+		return false
+	}
+	if profile.Ignored(w.ignore, filepath.ToSlash(rel)) {
+		return true
+	}
+	root, err := filepath.EvalSymlinks(w.dir)
+	if err != nil {
+		return false
+	}
+	target, err := filepath.EvalSymlinks(filepath.Join(w.dir, rel))
+	if err != nil {
+		return false
+	}
+	inside, err := filepath.Rel(root, target)
+	return err == nil && profile.Ignored(w.ignore, filepath.ToSlash(inside))
 }
 
 var errProtected = errors.New("path is inside a protected application directory")
@@ -33,6 +58,9 @@ func (w workspace) open(path string) (*os.Root, string, error) {
 	}
 	if w.isProtected(filepath.Join(w.dir, rel)) {
 		return nil, "", errProtected
+	}
+	if w.isIgnored(rel) {
+		return nil, "", errIgnored
 	}
 	root, err := os.OpenRoot(w.dir)
 	if err != nil {
@@ -144,7 +172,7 @@ func (w workspace) walk(path string, fn func(abs, rel string, info fs.FileInfo, 
 		rel := filepath.FromSlash(p)
 		abs := filepath.Join(w.dir, rel)
 		if d.IsDir() {
-			if w.isProtected(abs) {
+			if w.isProtected(abs) || (p != filepath.ToSlash(start) && w.isIgnored(rel)) {
 				return fs.SkipDir
 			}
 			return nil
@@ -154,7 +182,7 @@ func (w workspace) walk(path string, fn func(abs, rel string, info fs.FileInfo, 
 		if err != nil || !info.Mode().IsRegular() {
 			return nil
 		}
-		if d.Type()&fs.ModeSymlink != 0 && w.isProtected(abs) {
+		if w.isIgnored(rel) || (d.Type()&fs.ModeSymlink != 0 && w.isProtected(abs)) {
 			return nil
 		}
 		return fn(abs, rel, info, root)

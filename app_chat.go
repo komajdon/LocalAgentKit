@@ -104,12 +104,10 @@ func visibleReply(content string) string {
 	return domain.StripToolCalls(strings.TrimSuffix(content, appLayer.InterruptedNote))
 }
 
-// modelFor is the conversation's model override, or the configured one.
-func modelFor(cfg configSnapshot, conv *history.Conversation) string {
-	if conv.Model != "" {
-		return conv.Model
-	}
-	return cfg.Model
+// registryExtras are per-run settings of the file tools.
+type registryExtras struct {
+	journal tools.Journal
+	ignore  []string
 }
 
 // agentFor builds an agent for one conversation as the profile describes.
@@ -131,16 +129,13 @@ func (a *App) agentFor(cfg configSnapshot, profile ModelProfile, conv *history.C
 
 // registryFor builds the tools for a work directory. Without a pool there are
 // no MCP tools and no server is started.
-func (a *App) registryFor(ctx context.Context, cfg configSnapshot, workDir string, pool *tools.MCPPool, journal ...tools.Journal) *domain.ToolRegistry {
-	var record tools.Journal
-	if len(journal) > 0 {
-		record = journal[0]
-	}
+func (a *App) registryFor(ctx context.Context, cfg configSnapshot, workDir string, pool *tools.MCPPool, extras registryExtras) *domain.ToolRegistry {
 	return tools.NewRegistry(tools.Options{
 		WorkDir:    workDir,
 		MCPServers: cfg.MCPServers,
 		MCP:        pool,
-		Journal:    record,
+		Journal:    extras.journal,
+		Ignore:     extras.ignore,
 		Context:    ctx,
 		Search:     tools.SearchConfig{Provider: cfg.SearchProvider, APIKey: cfg.SearchAPIKey},
 		Sandbox:    sandboxOptions(cfg),
@@ -218,9 +213,13 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 	defer close(r.done)
 	defer r.cancel()
 
-	cfg := a.config()
-	profile := a.modelProfile(r.ctx, cfg, modelFor(cfg, prior))
-	agent := a.agentFor(cfg, profile, prior, a.registryFor(r.ctx, cfg, prior.WorkDir, a.mcp, a.journalFor(r.convID, r.id)))
+	rules := a.rulesFor(prior)
+	cfg, model := rules.apply(a.config(), prior)
+	profile := a.modelProfile(r.ctx, cfg, model)
+	registry := a.registryFor(r.ctx, cfg, prior.WorkDir, a.mcp, registryExtras{
+		journal: a.journalFor(r.convID, r.id), ignore: rules.workspace.Ignore})
+	registry.Keep(rules.profile.Allows)
+	agent := a.agentFor(cfg, profile, prior, registry)
 	agent.OnChunk = func(chunk string) {
 		a.emitRun(r, "chat:chunk", chunk, func() { r.streaming.WriteString(chunk) })
 	}
@@ -245,7 +244,7 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 			r.turn = append(r.turn, displayItem{Type: "tool", Data: map[string]any{"kind": "result", "tool": name, "body": result}})
 		})
 	}
-	log := a.log.With("run_id", r.id, "conversation_id", r.convID, "provider", cfg.Provider, "model", profile.Model)
+	log := a.log.With("run_id", r.id, "conversation_id", r.convID, "provider", cfg.Provider, "model", profile.Model, "profile", rules.profile.ID)
 	log.Info("run_start")
 	agent.MaxRounds = cfg.MaxRounds
 	agent.MaxParallel = cfg.MaxParallelTools
@@ -266,7 +265,7 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 		a.emitRun(r, "chat:context_usage", usage, func() { r.usage = &usage })
 	}
 	agent.OnPermissionRequest = func(req appLayer.PermissionRequest) bool {
-		return a.authorize(r.ctx, r.convID, prior.WorkDir, req)
+		return a.authorize(r.ctx, r.convID, prior.WorkDir, rules, req)
 	}
 
 	warn := func(text string) {

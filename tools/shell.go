@@ -25,7 +25,7 @@ type shellTool struct {
 func NewShell(workDir string, opts sandbox.Options, protected ...string) domain.Tool {
 	opts.WorkDir = workDir
 	opts.Hidden = protected
-	return &shellTool{workspace{workDir, protected}, opts}
+	return &shellTool{workspace{dir: workDir, protected: protected}, opts}
 }
 
 func (t *shellTool) Name() string        { return "shell" }

@@ -94,6 +94,15 @@ func (r *ToolRegistry) Find(name string) (Tool, bool) {
 	return t, ok
 }
 
+// Keep removes the tools for which keep returns false.
+func (r *ToolRegistry) Keep(keep func(name string) bool) {
+	for name := range r.tools {
+		if !keep(name) {
+			delete(r.tools, name)
+		}
+	}
+}
+
 // All returns the tools sorted by name, so prompts are stable between runs.
 func (r *ToolRegistry) All() []Tool {
 	out := make([]Tool, 0, len(r.tools))

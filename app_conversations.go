@@ -162,11 +162,13 @@ func (a *App) GetContextUsage() appLayer.ContextUsage {
 		return appLayer.ContextUsage{}
 	}
 	// An estimate; MCP servers are not started just to count their schemas.
-	cfg := a.config()
+	rules := a.rulesFor(conv)
+	cfg, model := rules.apply(a.config(), conv)
 	// No request to the provider: only the saved override applies here.
-	model := modelFor(cfg, conv)
 	profile := effective(cfg, model, domain.Capabilities{}, a.GetModelSettings().Overrides[overrideKey(cfg.Provider, model)])
-	return a.agentFor(cfg, profile, conv, a.registryFor(a.ctx, cfg, conv.WorkDir, nil)).CurrentUsage()
+	registry := a.registryFor(a.ctx, cfg, conv.WorkDir, nil, registryExtras{})
+	registry.Keep(rules.profile.Allows)
+	return a.agentFor(cfg, profile, conv, registry).CurrentUsage()
 }
 
 func (a *App) RenameConversation(id, title string) error {

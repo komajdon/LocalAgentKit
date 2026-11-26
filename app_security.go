@@ -56,10 +56,11 @@ type pendingPrompt struct {
 }
 
 // authorize decides one tool call, prompting the user when needed.
-func (a *App) authorize(ctx context.Context, conversationID, workspace string, req appLayer.PermissionRequest) bool {
+func (a *App) authorize(ctx context.Context, conversationID, workspace string, restrict rules, req appLayer.PermissionRequest) bool {
 	a.mu.Lock()
 	setting := string(a.cfg.ToolPermissions[req.Tool])
 	a.mu.Unlock()
+	setting = restrict.permission(req.Tool, setting)
 
 	outcome := func(s string) {
 		if req.Outcome != nil {

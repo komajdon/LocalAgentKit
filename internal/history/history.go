@@ -17,6 +17,7 @@ type ConvMeta struct {
 	Title     string    `json:"title"`
 	WorkDir   string    `json:"work_dir"`
 	Model     string    `json:"model,omitempty"` // per-conversation model override
+	ProfileID string    `json:"profile_id,omitempty"`
 	Pinned    bool      `json:"pinned,omitempty"`
 	Tags      []string  `json:"tags,omitempty"`
 	CreatedAt time.Time `json:"created_at"`

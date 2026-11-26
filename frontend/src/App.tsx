@@ -8,12 +8,14 @@ import {
   DeleteConversation, UpdateConversationPath, RenameConversation,
   SearchConversations, ExportConversation, SetConversationModel,
   TruncateAndResend, SetConversationPinned, SetConversationTags,
-  ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, ExportDiagnostics, GetRunState, GetMCPStatus, RestartMCPServer, SaveConfig, PickDirectory,
+  ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, RecentWorkDirs, ExportDiagnostics, GetRunState, GetMCPStatus, RestartMCPServer, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, ProbeMCPServer,
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation,
   GetContextUsage, BranchConversation, ImportConversation,
 } from '../wailsjs/go/main/App'
+import { ProfilePicker } from './components/ProfilePicker'
+import { WorkspaceManager } from './components/WorkspaceManager'
 import { DiffView } from './components/DiffView'
 import { FileChanges } from './components/FileChanges'
 import { ToolTimeline } from './components/ToolTimeline'
@@ -143,6 +145,8 @@ export default function App() {
   const [showUsage, setShowUsage] = useState(false)
   const [showTimeline, setShowTimeline] = useState(false)
   const [showChanges, setShowChanges] = useState(false)
+  const [showWorkspaces, setShowWorkspaces] = useState(false)
+  const [recentDirs, setRecentDirs] = useState<string[]>([])
   const [convLimit, setConvLimit] = useState(CONV_PAGE)
   const [runConv, setRunConv] = useState<string | null>(null)
   const running = runConv !== null && runConv === activeId
@@ -283,6 +287,10 @@ export default function App() {
     if (err) setMcpRestartError(`${name}: ${err}`)
     refreshMcpStatus()
   }
+
+  useEffect(() => {
+    if (showNew) RecentWorkDirs().then(d => setRecentDirs(d || [])).catch(() => {})
+  }, [showNew])
 
   // MCP UI state
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
@@ -978,6 +986,7 @@ export default function App() {
               <button className="foot-btn" onClick={() => setShowUsage(true)}>📊 Usage</button>
             <button className="foot-btn" onClick={() => setShowTimeline(true)} disabled={!activeId}>🧭 Tool timeline</button>
             <button className="foot-btn" onClick={() => setShowChanges(true)} disabled={!activeId}>📝 File changes</button>
+            <button className="foot-btn" onClick={() => setShowWorkspaces(true)}>🗂 Workspaces &amp; profiles</button>
               <button className="foot-btn" onClick={() => { setShowCfg(true); setCfgTab('general') }}
                 aria-label="Settings">⚙️ Settings</button>
               <div className="conn-badge">
@@ -995,6 +1004,7 @@ export default function App() {
           <>
             <div className="topbar">
               <div className="topbar-title">{activeTitle || 'Conversation'}</div>
+              {activeId && <ProfilePicker conversationId={activeId} reload={showWorkspaces} />}
 
               {/* per-conversation model selector */}
               <select
@@ -1259,7 +1269,8 @@ export default function App() {
               <div className="field">
                 <label>Working Directory</label>
                 <div className="dir-row">
-                  <input value={newPath} onChange={e => setNewPath(e.target.value)} placeholder="~ (home directory)" />
+                  <input value={newPath} onChange={e => setNewPath(e.target.value)} placeholder="~ (home directory)" list="recent-dirs" />
+                  <datalist id="recent-dirs">{recentDirs.map(d => <option key={d} value={d} />)}</datalist>
                   <button className="pick-btn" onClick={() => PickDirectory().then(d => d && setNewPath(d))}>Browse</button>
                 </div>
               </div>
@@ -1276,6 +1287,8 @@ export default function App() {
       {showTimeline && activeId && <ToolTimeline conversationId={activeId} onClose={() => setShowTimeline(false)} />}
 
       {showChanges && activeId && <FileChanges conversationId={activeId} onClose={() => setShowChanges(false)} />}
+
+      {showWorkspaces && <WorkspaceManager onClose={() => setShowWorkspaces(false)} />}
 
       {showUsage && <UsageDashboard conversations={convList} onClose={() => setShowUsage(false)} />}
 

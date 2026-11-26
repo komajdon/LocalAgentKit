@@ -174,6 +174,7 @@ export namespace history {
 	    title: string;
 	    work_dir: string;
 	    model?: string;
+	    profile_id?: string;
 	    pinned?: boolean;
 	    tags?: string[];
 	    // Go type: time
@@ -191,6 +192,7 @@ export namespace history {
 	        this.title = source["title"];
 	        this.work_dir = source["work_dir"];
 	        this.model = source["model"];
+	        this.profile_id = source["profile_id"];
 	        this.pinned = source["pinned"];
 	        this.tags = source["tags"];
 	        this.created_at = this.convertValues(source["created_at"], null);
@@ -333,6 +335,7 @@ export namespace history {
 	    title: string;
 	    work_dir: string;
 	    model?: string;
+	    profile_id?: string;
 	    pinned?: boolean;
 	    tags?: string[];
 	    // Go type: time
@@ -355,6 +358,7 @@ export namespace history {
 	        this.title = source["title"];
 	        this.work_dir = source["work_dir"];
 	        this.model = source["model"];
+	        this.profile_id = source["profile_id"];
 	        this.pinned = source["pinned"];
 	        this.tags = source["tags"];
 	        this.created_at = this.convertValues(source["created_at"], null);
@@ -427,6 +431,7 @@ export namespace main {
 	    title: string;
 	    work_dir: string;
 	    model?: string;
+	    profile_id?: string;
 	    pinned?: boolean;
 	    tags?: string[];
 	    // Go type: time
@@ -451,6 +456,7 @@ export namespace main {
 	        this.title = source["title"];
 	        this.work_dir = source["work_dir"];
 	        this.model = source["model"];
+	        this.profile_id = source["profile_id"];
 	        this.pinned = source["pinned"];
 	        this.tags = source["tags"];
 	        this.created_at = this.convertValues(source["created_at"], null);
@@ -706,6 +712,63 @@ export namespace permission {
 	        this.tool = source["tool"];
 	        this.label = source["label"];
 	        this.scope = source["scope"];
+	    }
+	}
+
+}
+
+export namespace profile {
+	
+	export class Profile {
+	    id: string;
+	    name: string;
+	    built_in: boolean;
+	    instructions: string;
+	    model: string;
+	    tools: string[];
+	    permissions: Record<string, string>;
+	    context_limit: number;
+	    context_strategy: string;
+	    max_rounds: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Profile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.built_in = source["built_in"];
+	        this.instructions = source["instructions"];
+	        this.model = source["model"];
+	        this.tools = source["tools"];
+	        this.permissions = source["permissions"];
+	        this.context_limit = source["context_limit"];
+	        this.context_strategy = source["context_strategy"];
+	        this.max_rounds = source["max_rounds"];
+	    }
+	}
+	export class Workspace {
+	    id: string;
+	    name: string;
+	    path: string;
+	    profile_id: string;
+	    permissions: Record<string, string>;
+	    ignore: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Workspace(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.profile_id = source["profile_id"];
+	        this.permissions = source["permissions"];
+	        this.ignore = source["ignore"];
 	    }
 	}
 
