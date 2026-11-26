@@ -63,9 +63,6 @@ Correction to the original review: 13 built-in free providers, not 14.
 
 ## Work packages
 
-The first 29 commits are listed with the work packages of the first round; the
-later ones are below them.
-
 | Work Package | Status | Commit Hash | Tests | Remaining Issues |
 |---|---|---|---|---|
 | Plan, baseline, build, format, lint | Done | `7dac9c6` `a655892` `3152778` `ae67d6b` | baseline | – |
