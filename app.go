@@ -42,6 +42,8 @@ type App struct {
 	ctx context.Context
 	cfg config.Config
 
+	startupErr string // set once during startup
+
 	mu       sync.Mutex
 	agent    *appLayer.ConversationalAgent
 	cancelFn context.CancelFunc
@@ -70,7 +72,9 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	if err := store.Init(store.DataDir()); err != nil {
 		// Surface the error to the user immediately rather than failing silently.
-		runtime.EventsEmit(ctx, "app:fatal", "Failed to open data store: "+err.Error())
+		// The event can fire before the UI listens; GetStartupError covers that.
+		a.startupErr = "Failed to open data store: " + err.Error()
+		runtime.EventsEmit(ctx, "app:fatal", a.startupErr)
 	}
 	a.cfg = config.Load()
 	m, err := permission.NewManager(grantStore{})
@@ -87,6 +91,9 @@ func (a *App) shutdown(_ context.Context) {
 	tools.ShutdownMCPClients()
 	_ = store.Close()
 }
+
+// GetStartupError reports why the app could not start properly, or "".
+func (a *App) GetStartupError() string { return a.startupErr }
 
 // ── Auto-backup ─────────────────────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@ import {
   DeleteConversation, UpdateConversationPath, RenameConversation,
   SearchConversations, ExportConversation, SetConversationModel,
   TruncateAndResend, SetConversationPinned, SetConversationTags,
-  ListModels, ListTools, GetConfig, GetSandboxStatus, SaveConfig, PickDirectory,
+  ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, ProbeMCPServer,
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup,
@@ -437,6 +437,8 @@ export default function App() {
       setFatalError(msg)
       notify('Fatal error', msg)
     }))
+
+    GetStartupError().then(msg => { if (msg) setFatalError(msg) }).catch(() => {})
 
     offs.push(EventsOn('whisper:downloading', (model: string) => {
       setWhisperStatus(`Downloading whisper ${model} model…`)

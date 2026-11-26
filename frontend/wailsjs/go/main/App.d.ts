@@ -23,6 +23,8 @@ export function GetContextUsage():Promise<app.ContextUsage>;
 
 export function GetSandboxStatus():Promise<sandbox.Status>;
 
+export function GetStartupError():Promise<string>;
+
 export function GetUsageBudget():Promise<main.UsageBudget>;
 
 export function GetVersion():Promise<string>;

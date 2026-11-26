@@ -34,6 +34,10 @@ export function GetSandboxStatus() {
   return window['go']['main']['App']['GetSandboxStatus']();
 }
 
+export function GetStartupError() {
+  return window['go']['main']['App']['GetStartupError']();
+}
+
 export function GetUsageBudget() {
   return window['go']['main']['App']['GetUsageBudget']();
 }
