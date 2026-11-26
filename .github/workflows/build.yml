@@ -35,7 +35,9 @@ jobs:
         run: npm ci && npm run lint && npm test && npm run build && npm audit
         working-directory: frontend
       - name: Format
-        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+        run: |
+          out=$(gofmt -l $(git ls-files '*.go'))
+          test -z "$out" || { echo "$out"; exit 1; }
       - name: Vet
         run: go vet ./...
       - name: Compile desktop (cgo) code
