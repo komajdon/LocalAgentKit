@@ -3,7 +3,7 @@
 A local-first desktop AI agent with tool use, voice input, MCP support, and persistent conversation history. Runs entirely on your machine — no cloud required.
 
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue)
-![Go](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go)
+![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
