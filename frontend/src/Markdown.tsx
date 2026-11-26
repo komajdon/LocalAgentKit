@@ -6,15 +6,8 @@
  */
 import { ReactNode, Component, ErrorInfo } from 'react'
 
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
 /** Apply inline formatting: bold, italic, inline code, links */
-function inlineToJSX(text: string, key: number): ReactNode {
+function inlineToJSX(text: string): ReactNode {
   const tokens: ReactNode[] = []
   // Combined regex for **bold**, *italic*, `code`, [link](url)
   const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g
@@ -146,7 +139,7 @@ function renderBlock(block: Block, idx: number): ReactNode {
         </div>
       )
     case 'heading': {
-      const content = inlineToJSX(block.text, idx)
+      const content = inlineToJSX(block.text)
       if (block.level === 1) return <h1 key={idx}>{content}</h1>
       if (block.level === 2) return <h2 key={idx}>{content}</h2>
       return <h3 key={idx}>{content}</h3>
@@ -156,23 +149,23 @@ function renderBlock(block: Block, idx: number): ReactNode {
     case 'blockquote':
       return (
         <blockquote key={idx}>
-          {block.lines.map((l, j) => <p key={j}>{inlineToJSX(l, j)}</p>)}
+          {block.lines.map((l, j) => <p key={j}>{inlineToJSX(l)}</p>)}
         </blockquote>
       )
     case 'ul':
       return (
         <ul key={idx}>
-          {block.items.map((item, j) => <li key={j}>{inlineToJSX(item, j)}</li>)}
+          {block.items.map((item, j) => <li key={j}>{inlineToJSX(item)}</li>)}
         </ul>
       )
     case 'ol':
       return (
         <ol key={idx}>
-          {block.items.map((item, j) => <li key={j}>{inlineToJSX(item, j)}</li>)}
+          {block.items.map((item, j) => <li key={j}>{inlineToJSX(item)}</li>)}
         </ol>
       )
     case 'para':
-      return <p key={idx}>{inlineToJSX(block.lines.join(' '), idx)}</p>
+      return <p key={idx}>{inlineToJSX(block.lines.join(' '))}</p>
   }
 }
 
