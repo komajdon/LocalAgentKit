@@ -29,16 +29,16 @@ Status: `todo`, `done`, `partial`, `blocked`. Priority P0 = security/data integr
 | ID | Package | Pri | Depends | Acceptance criteria | Status |
 |----|---------|-----|---------|---------------------|--------|
 | WP01 | Plan and baseline | P0 | – | This file committed | done |
-| WP02 | Headless build and test on Linux; gofmt | P0 | – | `go build ./...` and `go vet ./...` pass without GTK headers | todo |
-| WP03 | Baseline tests and fakes | P0 | WP02 | Tests for parser, paths, cut helpers, versions, import, agent loop, permissions, streaming | todo |
-| WP04 | CI quality gates | P0 | WP03 | CI runs format, lint, vet, test, race, frontend build | todo |
-| WP05 | Filesystem boundaries (4.1) | P0 | WP03 | Symlink and traversal escapes fail; regression tests | todo |
-| WP06 | Shell sandbox (4.2) | P0 | WP03 | Isolation backends, scrubbed env, strict mode fails closed, level visible | todo |
-| WP07 | Permission policy (4.3) | P0 | WP03 | Central policy; session/workspace grants; revocation; sensitive tools ask | todo |
-| WP08 | Untrusted tool output (4.4) | P0 | WP07 | Delimited, size-capped, provenance; cannot change policy | todo |
-| WP09 | Keychain, migration, encrypted backups (4.5) | P0 | WP03 | Old data still readable; no raw key in backups | todo |
-| WP10 | WebView hardening (4.6) | P0 | – | Deny by default; CSP; mic only on request | todo |
-| WP11 | Credential redaction (4.7) | P0 | – | Keys absent from errors and URLs where possible | todo |
+| WP02 | Headless build and test on Linux; gofmt | P0 | – | `go build ./...` and `go vet ./...` pass without GTK headers | done `a655892` `3152778` |
+| WP03 | Baseline tests and fakes | P0 | WP02 | Tests for parser, paths, cut helpers, versions, import, agent loop, permissions, streaming | done `62df1a6` (+`f9077f0`) |
+| WP04 | CI quality gates | P0 | WP03 | CI runs format, lint, vet, test, race, frontend build | done `ae67d6b` `179bfa1` `ed1c69e`; CI not run (nothing pushed) |
+| WP05 | Filesystem boundaries (4.1) | P0 | WP03 | Symlink and traversal escapes fail; regression tests | done `6126d37` |
+| WP06 | Shell sandbox (4.2) | P0 | WP03 | Isolation backends, scrubbed env, strict mode fails closed, level visible | done `46c9399`; macOS profile not run; no Windows backend; no container backend |
+| WP07 | Permission policy (4.3) | P0 | WP03 | Central policy; session/workspace grants; revocation; sensitive tools ask | done `422bc26` |
+| WP08 | Untrusted tool output (4.4) | P0 | WP07 | Delimited, size-capped, provenance; cannot change policy | done `43921c8` |
+| WP09 | Keychain, migration, encrypted backups (4.5) | P0 | WP03 | Old data still readable; no raw key in backups | done `8f367b9` `419b509`; keychain opt-in; no key rotation; real OS keychain not exercised |
+| WP10 | WebView hardening (4.6) | P0 | – | Deny by default; CSP; mic only on request | done `2228916`; verified on Linux only |
+| WP11 | Credential redaction (4.7) | P0 | – | Keys absent from errors and URLs where possible | done `608acf8` |
 | WP12 | Typed args and context in tools (5, 9) | P1 | WP03 | JSON-typed args; Stop cancels shell, MCP, search, documents | todo |
 | WP13 | Native tool calling (5) | P1 | WP12 | OpenAI and Ollama native calls; multiline text fallback | todo |
 | WP14 | Streaming and retry (6) | P1 | WP13 | No duplicate output; backoff, jitter, Retry-After | todo |
@@ -57,13 +57,23 @@ Status: `todo`, `done`, `partial`, `blocked`. Priority P0 = security/data integr
 
 ## Decisions
 
-- New dependencies are added only where the task requires them (CONTRIBUTING asks for discussion; each one is listed in the report).
+- New dependencies only where the task requires them (CONTRIBUTING asks for discussion): `github.com/zalando/go-keyring`; `golang.org/x/crypto` is now used directly.
+- Go 1.26.11 and Wails 2.13.0, for security fixes and `os.Root`.
+- Shell sandbox defaults to `auto` with network off.
+- Keychain storage is opt-in, because the data folder is otherwise portable.
+- After web, document or MCP content enters a conversation, "Always Allow" no longer covers sensitive tools.
 
-## Known blockers
+## Local verification setup
 
-- No GTK/WebKit headers: the cgo code in `webview_linux.go` cannot be compiled here.
-- macOS and Windows behaviour can only be type-checked by cross-compilation, not run.
+- `/tmp` is a small shared tmpfs: set `GOTMPDIR=$HOME/.cache/lak-gotmp`.
+- A real Linux desktop build works against GTK/WebKit headers unpacked (without root) in `~/.cache/lak-sysroot`; source `~/.cache/lak-sysroot/env.sh`, then `go build -tags desktop,production,webkit2_41`. This replaces the original GTK blocker.
+- Headless run: `broadwayd :7` plus `GDK_BACKEND=broadway`, with an isolated `HOME`.
+
+## Known limits
+
+- macOS and Windows are type-checked by cross-compilation only.
+- The GitNexus index is from `abbc7c1`; it does not know the new files.
 
 ## Next action
 
-WP02.
+WP14 (streaming and retry), then WP12, WP15, WP16, WP13.
