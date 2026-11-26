@@ -49,3 +49,19 @@ type ToolCallingProvider interface {
 
 // ErrToolsUnsupported reports that native tool calling is not available.
 var ErrToolsUnsupported = errors.New("this model does not support native tool calling")
+
+// Capabilities describes what a provider can do with one model. A nil or zero
+// field means it could not be determined.
+type Capabilities struct {
+	NativeTools      *bool `json:"native_tools"`
+	ContextWindow    int   `json:"context_window"`
+	Streaming        bool  `json:"streaming"`
+	UsageReporting   bool  `json:"usage_reporting"`
+	ModelDiscovery   bool  `json:"model_discovery"`
+	StructuredOutput *bool `json:"structured_output"`
+}
+
+// ModelDescriber is a provider that can report a model's capabilities.
+type ModelDescriber interface {
+	Describe(ctx context.Context, model string) (Capabilities, error)
+}

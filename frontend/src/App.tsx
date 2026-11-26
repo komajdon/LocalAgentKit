@@ -14,6 +14,7 @@ import {
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation,
   GetContextUsage, BranchConversation, ImportConversation,
 } from '../wailsjs/go/main/App'
+import { ModelSettingsPanel } from './components/ModelSettingsPanel'
 import { UsageDashboard } from './components/UsageDashboard'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -1631,6 +1632,8 @@ export default function App() {
                   </label>
                   <div className="field-hint">Alert me when a long task finishes, a permission is needed, or an error occurs — only while the window is in the background.</div>
                 </div>
+
+                <ModelSettingsPanel provider={cfg.provider} model={cfg.model} onModels={setModels} />
 
                 <div className="field">
                   <label htmlFor="tool-calling">Tool calling</label>

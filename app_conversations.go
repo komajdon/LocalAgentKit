@@ -9,6 +9,7 @@ import (
 	"time"
 
 	appLayer "agent-gui/app"
+	"agent-gui/domain"
 	"agent-gui/internal/history"
 )
 
@@ -159,7 +160,10 @@ func (a *App) GetContextUsage() appLayer.ContextUsage {
 	}
 	// An estimate; MCP servers are not started just to count their schemas.
 	cfg := a.config()
-	return a.agentFor(cfg, conv, a.registryFor(a.ctx, cfg, conv.WorkDir, nil)).CurrentUsage()
+	// No request to the provider: only the saved override applies here.
+	model := modelFor(cfg, conv)
+	profile := effective(cfg, model, domain.Capabilities{}, a.GetModelSettings().Overrides[overrideKey(cfg.Provider, model)])
+	return a.agentFor(cfg, profile, conv, a.registryFor(a.ctx, cfg, conv.WorkDir, nil)).CurrentUsage()
 }
 
 func (a *App) RenameConversation(id, title string) error {

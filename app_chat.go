@@ -102,17 +102,21 @@ func visibleReply(content string) string {
 	return domain.StripToolCalls(strings.TrimSuffix(content, appLayer.InterruptedNote))
 }
 
-// agentFor builds an agent for one conversation from a configuration snapshot.
-func (a *App) agentFor(cfg configSnapshot, conv *history.Conversation, registry *domain.ToolRegistry) *appLayer.ConversationalAgent {
-	model := cfg.Model
+// modelFor is the conversation's model override, or the configured one.
+func modelFor(cfg configSnapshot, conv *history.Conversation) string {
 	if conv.Model != "" {
-		model = conv.Model
+		return conv.Model
 	}
-	agent := appLayer.NewConversationalAgent(model, a.providerFor(cfg), registry, cfg.SystemPrompt, cfg.ContextLimit)
+	return cfg.Model
+}
+
+// agentFor builds an agent for one conversation as the profile describes.
+func (a *App) agentFor(cfg configSnapshot, profile ModelProfile, conv *history.Conversation, registry *domain.ToolRegistry) *appLayer.ConversationalAgent {
+	agent := appLayer.NewConversationalAgent(profile.Model, a.provider(cfg), registry, cfg.SystemPrompt, profile.ContextLimit)
 	for _, m := range conv.Messages {
 		agent.Inject(m.Message())
 	}
-	if cfg.ToolCalling == "text" {
+	if profile.ToolCalling == "text" {
 		agent.UseTextTools()
 	}
 	agent.SetUsage(conv.TokenUsage.PromptTokens, conv.TokenUsage.CompletionTokens)
@@ -204,7 +208,8 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 	defer r.cancel()
 
 	cfg := a.config()
-	agent := a.agentFor(cfg, prior, a.registryFor(r.ctx, cfg, prior.WorkDir, a.mcp))
+	profile := a.modelProfile(r.ctx, cfg, modelFor(cfg, prior))
+	agent := a.agentFor(cfg, profile, prior, a.registryFor(r.ctx, cfg, prior.WorkDir, a.mcp))
 	agent.OnChunk = func(chunk string) {
 		a.emitRun(r, "chat:chunk", chunk, func() { r.streaming.WriteString(chunk) })
 	}
@@ -236,11 +241,7 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 		return a.authorize(r.ctx, r.convID, prior.WorkDir, req)
 	}
 
-	model := cfg.Model
-	if prior.Model != "" {
-		model = prior.Model
-	}
-	m := a.newMeter(string(cfg.Provider), model, r.convID, func(text string) {
+	m := a.newMeter(string(cfg.Provider), profile.Model, r.convID, func(text string) {
 		a.emitRun(r, "chat:usage_warning", text, func() {
 			r.turn = append(r.turn, displayItem{Type: "status", Data: map[string]any{"text": "Usage warning: " + text}})
 		})

@@ -79,21 +79,6 @@ func (a *App) SaveConfig(cfg config.Config) string {
 	return errString(config.Save(cfg))
 }
 
-// ── Models ───────────────────────────────────────────────────────────────────
-
-type ModelList struct {
-	Models []string `json:"models"`
-	Error  string   `json:"error,omitempty"`
-}
-
-func (a *App) ListModels() ModelList {
-	models, err := a.providerFor(a.config()).ListModels()
-	if err != nil {
-		return ModelList{Error: err.Error()}
-	}
-	return ModelList{Models: models}
-}
-
 // ── MCP server management ────────────────────────────────────────────────────
 
 func (a *App) ListMCPServers() []config.MCPServerConfig {

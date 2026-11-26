@@ -15,6 +15,8 @@ export function CheckForUpdate():Promise<main.UpdateInfo>;
 
 export function DeleteConversation(arg1:string):Promise<void>;
 
+export function DescribeModel(arg1:string):Promise<main.ModelProfile>;
+
 export function ExportBackup(arg1:string):Promise<string>;
 
 export function ExportConversation(arg1:string,arg2:string):Promise<string>;
@@ -26,6 +28,8 @@ export function GetContextUsage():Promise<app.ContextUsage>;
 export function GetKeyLocation():Promise<string>;
 
 export function GetMCPStatus():Promise<Array<tools.MCPStatus>>;
+
+export function GetModelSettings():Promise<main.ModelSettings>;
 
 export function GetRunState():Promise<main.RunState>;
 
@@ -61,6 +65,8 @@ export function PickDirectory():Promise<string>;
 
 export function ProbeMCPServer(arg1:config.MCPServerConfig):Promise<Array<string>>;
 
+export function RefreshModels():Promise<main.ModelList>;
+
 export function RenameConversation(arg1:string,arg2:string):Promise<void>;
 
 export function RespondPermission(arg1:string,arg2:string):Promise<void>;
@@ -74,6 +80,8 @@ export function RevokePermissionGrant(arg1:string):Promise<string>;
 export function SaveConfig(arg1:config.Config):Promise<string>;
 
 export function SaveMCPServers(arg1:Array<config.MCPServerConfig>):Promise<string>;
+
+export function SaveModelSettings(arg1:main.ModelSettings):Promise<string>;
 
 export function SaveUsageSettings(arg1:usage.Settings):Promise<string>;
 
@@ -94,6 +102,8 @@ export function StartRecording():Promise<void>;
 export function StopAgent():Promise<void>;
 
 export function StopRecording():Promise<string>;
+
+export function TestConnection():Promise<main.ConnectionResult>;
 
 export function TranscribeAudio(arg1:Array<number>):Promise<string>;
 

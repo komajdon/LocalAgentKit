@@ -54,6 +54,7 @@ type App struct {
 	promptSeq   uint64         // guarded by mu
 
 	ledger *usage.Ledger
+	models modelCache
 
 	recMu  sync.Mutex
 	recSes *recorder.Session

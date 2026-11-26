@@ -30,17 +30,21 @@ func newHTTPClient() *http.Client {
 // idleReader closes the body when no data arrives for idleTimeout.
 type idleReader struct {
 	body  io.ReadCloser
+	limit time.Duration
 	timer *time.Timer
 }
 
-func newIdleReader(body io.ReadCloser) *idleReader {
-	return &idleReader{body, time.AfterFunc(idleTimeout, func() { _ = body.Close() })}
+func newIdleReader(body io.ReadCloser, limit time.Duration) *idleReader {
+	if limit <= 0 {
+		limit = idleTimeout
+	}
+	return &idleReader{body, limit, time.AfterFunc(limit, func() { _ = body.Close() })}
 }
 
 func (r *idleReader) Read(p []byte) (int, error) {
 	n, err := r.body.Read(p)
 	if n > 0 {
-		r.timer.Reset(idleTimeout)
+		r.timer.Reset(r.limit)
 	}
 	return n, err
 }

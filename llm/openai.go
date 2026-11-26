@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"agent-gui/domain"
 	"agent-gui/internal/redact"
@@ -78,6 +79,7 @@ type openAIChatResponse struct {
 // OpenAIProvider talks to any OpenAI-compatible endpoint.
 // Works with: OpenAI, Ollama (/v1), LM Studio, LocalAI, vLLM, etc.
 type OpenAIProvider struct {
+	idle    time.Duration // 0 means idleTimeout
 	baseURL string
 	apiKey  string
 	client  *http.Client
@@ -186,7 +188,7 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 		call.Function.Arguments += fragment.Function.Arguments
 	}
 	finished := false
-	stream := newIdleReader(resp.Body)
+	stream := newIdleReader(resp.Body, p.idle)
 	defer stream.stop()
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024) // 8 MB max token

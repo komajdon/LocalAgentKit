@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"agent-gui/domain"
 	"agent-gui/internal/redact"
@@ -48,6 +49,7 @@ type ollamaChatResponse struct {
 
 // OllamaProvider talks to Ollama's native /api/chat endpoint.
 type OllamaProvider struct {
+	idle   time.Duration // 0 means idleTimeout
 	host   string
 	client *http.Client
 }
@@ -129,7 +131,7 @@ func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages 
 	var usage *domain.Usage
 	var calls []domain.ToolCall
 	finished := false
-	stream := newIdleReader(resp.Body)
+	stream := newIdleReader(resp.Body, p.idle)
 	defer stream.stop()
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024) // 8 MB max token

@@ -14,6 +14,10 @@ export function DeleteConversation(arg1) {
   return window['go']['main']['App']['DeleteConversation'](arg1);
 }
 
+export function DescribeModel(arg1) {
+  return window['go']['main']['App']['DescribeModel'](arg1);
+}
+
 export function ExportBackup(arg1) {
   return window['go']['main']['App']['ExportBackup'](arg1);
 }
@@ -36,6 +40,10 @@ export function GetKeyLocation() {
 
 export function GetMCPStatus() {
   return window['go']['main']['App']['GetMCPStatus']();
+}
+
+export function GetModelSettings() {
+  return window['go']['main']['App']['GetModelSettings']();
 }
 
 export function GetRunState() {
@@ -106,6 +114,10 @@ export function ProbeMCPServer(arg1) {
   return window['go']['main']['App']['ProbeMCPServer'](arg1);
 }
 
+export function RefreshModels() {
+  return window['go']['main']['App']['RefreshModels']();
+}
+
 export function RenameConversation(arg1, arg2) {
   return window['go']['main']['App']['RenameConversation'](arg1, arg2);
 }
@@ -132,6 +144,10 @@ export function SaveConfig(arg1) {
 
 export function SaveMCPServers(arg1) {
   return window['go']['main']['App']['SaveMCPServers'](arg1);
+}
+
+export function SaveModelSettings(arg1) {
+  return window['go']['main']['App']['SaveModelSettings'](arg1);
 }
 
 export function SaveUsageSettings(arg1) {
@@ -172,6 +188,10 @@ export function StopAgent() {
 
 export function StopRecording() {
   return window['go']['main']['App']['StopRecording']();
+}
+
+export function TestConnection() {
+  return window['go']['main']['App']['TestConnection']();
 }
 
 export function TranscribeAudio(arg1) {

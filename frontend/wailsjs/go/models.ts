@@ -112,6 +112,28 @@ export namespace config {
 
 export namespace domain {
 	
+	export class Capabilities {
+	    native_tools?: boolean;
+	    context_window: number;
+	    streaming: boolean;
+	    usage_reporting: boolean;
+	    model_discovery: boolean;
+	    structured_output?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Capabilities(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.native_tools = source["native_tools"];
+	        this.context_window = source["context_window"];
+	        this.streaming = source["streaming"];
+	        this.usage_reporting = source["usage_reporting"];
+	        this.model_discovery = source["model_discovery"];
+	        this.structured_output = source["structured_output"];
+	    }
+	}
 	export class ToolCall {
 	    id?: string;
 	    tool: string;
@@ -303,6 +325,24 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+	export class ConnectionResult {
+	    ok: boolean;
+	    models: number;
+	    millis: number;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectionResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.models = source["models"];
+	        this.millis = source["millis"];
+	        this.error = source["error"];
+	    }
+	}
 	export class ConversationView {
 	    id: string;
 	    title: string;
@@ -372,6 +412,88 @@ export namespace main {
 	        this.models = source["models"];
 	        this.error = source["error"];
 	    }
+	}
+	export class ModelOverride {
+	    context_limit: number;
+	    tool_calling: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelOverride(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.context_limit = source["context_limit"];
+	        this.tool_calling = source["tool_calling"];
+	    }
+	}
+	export class ModelProfile {
+	    model: string;
+	    detected: domain.Capabilities;
+	    context_limit: number;
+	    tool_calling: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelProfile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.model = source["model"];
+	        this.detected = this.convertValues(source["detected"], domain.Capabilities);
+	        this.context_limit = source["context_limit"];
+	        this.tool_calling = source["tool_calling"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ModelSettings {
+	    timeout_seconds: number;
+	    overrides: Record<string, ModelOverride>;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.timeout_seconds = source["timeout_seconds"];
+	        this.overrides = this.convertValues(source["overrides"], ModelOverride, true);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class RunState {
 	    conversation_id: string;
