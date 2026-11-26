@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"sync"
 )
 
 const sandboxExec = "/usr/bin/sandbox-exec"
@@ -19,8 +19,16 @@ func platformBackend() (*backend, error) {
 	return &backend{name: "sandbox-exec", wrap: wrap}, nil
 }
 
-// wrap builds a profile in which later rules override earlier ones. Paths are
-// passed as parameters, never spliced into the profile text.
+// scratch is this process's private temporary and home directory for sandboxed
+// commands.
+var scratch = sync.OnceValues(func() (string, error) {
+	dir, err := os.MkdirTemp("", "lak-sandbox-*")
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(dir)
+})
+
 func wrap(o Options, _ string, argv []string) (string, []string, error) {
 	work, err := filepath.EvalSymlinks(o.WorkDir)
 	if err != nil {
@@ -30,26 +38,23 @@ func wrap(o Options, _ string, argv []string) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	var profile strings.Builder
-	profile.WriteString(`(version 1)
-(allow default)
-(deny file-write*)
-(allow file-write* (subpath (param "WORK")) (subpath "/private/tmp") (subpath "/private/var/folders") (subpath "/dev"))
-(deny file-read* (subpath (param "HOME")))
-(allow file-read* (subpath (param "WORK")))
-(allow file-read-metadata)
-`)
-	args := []string{"-D", "WORK=" + work, "-D", "HOME=" + home}
-	for i, h := range o.Hidden {
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		home = resolved
+	}
+	tmp, err := scratch()
+	if err != nil {
+		return "", nil, fmt.Errorf("sandbox temporary directory: %w", err)
+	}
+	var hidden []string
+	for _, h := range o.Hidden {
 		if resolved, err := filepath.EvalSymlinks(h); err == nil {
-			name := fmt.Sprintf("HIDDEN%d", i)
-			args = append(args, "-D", name+"="+resolved)
-			fmt.Fprintf(&profile, "(deny file-read* file-write* (subpath (param %q)))\n", name)
+			hidden = append(hidden, resolved)
 		}
 	}
-	if !o.AllowNetwork {
-		profile.WriteString("(deny network*)\n")
-	}
-	args = append(args, "-p", profile.String())
+	rel, err := filepath.Rel(work, home)
+	homeVisible := err == nil && filepath.IsLocal(rel)
+
+	args := darwinProfile(work, home, tmp, hidden, o.AllowNetwork)
+	args = append(args, darwinEnv(tmp, homeVisible)...)
 	return sandboxExec, append(args, argv...), nil
 }

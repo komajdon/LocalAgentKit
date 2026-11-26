@@ -102,8 +102,8 @@ func TestIsolation(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(work, "made.txt")); err != nil {
 		t.Fatal("work directory should be writable:", err)
 	}
-	// The temp base lives under the sandbox's private /tmp, so a write there may
-	// "succeed" inside; what matters is that the host file is untouched.
+	// On Linux the temp base lives under the sandbox's private /tmp, so a write
+	// there may "succeed" inside; what matters is that the host file is untouched.
 	_, _ = output(t, o, "echo x > "+outside)
 	if out, err := output(t, o, "echo x > /lak-probe"); err == nil && runtime.GOOS == "linux" {
 		t.Fatalf("root filesystem should be read-only: %s", out)
@@ -113,6 +113,19 @@ func TestIsolation(t *testing.T) {
 	}
 	if out, err := output(t, o, "exec 3<>/dev/tcp/1.1.1.1/53"); err == nil {
 		t.Fatalf("network should be blocked: %s", out)
+	}
+}
+
+// Programs need a usable home and temporary directory inside the sandbox.
+func TestHomeAndTempAreUsable(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	o := Options{Mode: ModeStrict, WorkDir: t.TempDir()}
+	if s := Probe(o); !s.Isolated {
+		t.Skip("no isolation backend:", s.Detail)
+	}
+	out, err := output(t, o, `echo x > "$HOME/h" && f=$(mktemp) && echo y > "$f" && cat "$HOME/h" "$f"`)
+	if err != nil || !strings.Contains(out, "x") || !strings.Contains(out, "y") {
+		t.Fatalf("out=%q err=%v", out, err)
 	}
 }
 
