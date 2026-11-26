@@ -112,7 +112,7 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 	if err != nil {
 		return "", nil, fmt.Errorf("connection failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
@@ -164,7 +164,7 @@ func (p *OpenAIProvider) ListModels() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connection failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))

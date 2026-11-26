@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -986,10 +987,14 @@ func (a *App) CheckForUpdate() UpdateInfo {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if err != nil {
 		return info
 	}
-	defer resp.Body.Close()
+	// Close the body on every status so the connection is not leaked.
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return info
+	}
 
 	var payload struct {
 		TagName string `json:"tag_name"`
@@ -1015,7 +1020,8 @@ func isNewerVersion(latest, current string) bool {
 			if i >= 3 {
 				break
 			}
-			fmt.Sscanf(p, "%d", &nums[i])
+			// A non-numeric part is deliberately left as zero.
+			_, _ = fmt.Sscanf(p, "%d", &nums[i])
 		}
 		return nums
 	}
@@ -1072,17 +1078,18 @@ func (a *App) ImportBackup() string {
 	return "ok" // signal frontend to prompt for restart
 }
 
-func writeBackupArchive(dest, dataDir string) error {
+func writeBackupArchive(dest, dataDir string) (err error) {
 	f, err := os.Create(dest)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
 	gz := gzip.NewWriter(f)
-	defer gz.Close()
 	tw := tar.NewWriter(gz)
-	defer tw.Close()
+	// Close in reverse order and report failures: each Close flushes data, so
+	// ignoring one could report a truncated archive as a successful backup.
+	defer func() {
+		err = errors.Join(err, tw.Close(), gz.Close(), f.Close())
+	}()
 
 	for _, name := range []string{"agent.db", "agent.key"} {
 		path := filepath.Join(dataDir, name)
@@ -1114,13 +1121,13 @@ func readBackupArchive(src, dataDir string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return err

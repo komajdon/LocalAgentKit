@@ -10,6 +10,7 @@ package whisper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,20 +62,24 @@ func Transcribe(audioData []byte, model, dataDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer os.Remove(audioFile.Name())
+	defer func() { _ = os.Remove(audioFile.Name()) }()
 	if _, err := audioFile.Write(audioData); err != nil {
-		audioFile.Close()
+		_ = audioFile.Close()
 		return "", err
 	}
-	audioFile.Close()
+	if err := audioFile.Close(); err != nil {
+		return "", err
+	}
 
 	// Convert to 16 kHz mono WAV (required by whisper.cpp)
 	wavFile, err := os.CreateTemp("", "whisper-wav-*.wav")
 	if err != nil {
 		return "", err
 	}
-	wavFile.Close()
-	defer os.Remove(wavFile.Name())
+	if err := wavFile.Close(); err != nil {
+		return "", err
+	}
+	defer func() { _ = os.Remove(wavFile.Name()) }()
 
 	ffCtx, ffCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer ffCancel()
@@ -93,7 +98,7 @@ func Transcribe(audioData []byte, model, dataDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(outDir)
+	defer func() { _ = os.RemoveAll(outDir) }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), transcribeTimeout)
 	defer cancel()
@@ -184,7 +189,7 @@ func downloadFile(url, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
@@ -194,12 +199,11 @@ func downloadFile(url, dst string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		os.Remove(tmp)
+	_, copyErr := io.Copy(f, resp.Body)
+	if err := errors.Join(copyErr, f.Close()); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
-	f.Close()
 	return os.Rename(tmp, dst)
 }
 

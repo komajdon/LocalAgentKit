@@ -98,7 +98,7 @@ func (t *listDirTool) Execute(args map[string]string) string {
 			if info != nil {
 				size = info.Size()
 			}
-			sb.WriteString(fmt.Sprintf("[FILE] %s (%d bytes)\n", e.Name(), size))
+			fmt.Fprintf(&sb, "[FILE] %s (%d bytes)\n", e.Name(), size)
 		}
 	}
 	return sb.String()

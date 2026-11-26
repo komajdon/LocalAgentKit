@@ -2,7 +2,6 @@ package tools
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -457,58 +456,4 @@ func ProbeMCPServer(cfg config.MCPServerConfig) ([]string, error) {
 func methodForParams(params any) string {
 	// The only call that goes through call() is initialize.
 	return "initialize"
-}
-
-// contextCallMethod is a context-aware version for future use.
-func (c *mcpClient) contextCallMethod(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	id := c.nextID.Add(1)
-	ch := make(chan jsonRPCResponse, 1)
-
-	c.mu.Lock()
-	select {
-	case <-c.done:
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP server is not running")
-	default:
-	}
-	c.pending[id] = ch
-	c.mu.Unlock()
-
-	req := jsonRPCRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}
-	data, err := json.Marshal(req)
-	if err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, err
-	}
-	data = append(data, '\n')
-
-	c.writeMu.Lock()
-	_, werr := c.stdin.Write(data)
-	c.writeMu.Unlock()
-	if werr != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, werr
-	}
-
-	select {
-	case resp := <-ch:
-		if resp.Error != nil {
-			return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
-		}
-		return resp.Result, nil
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, ctx.Err()
-	case <-time.After(mcpCallTimeout):
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP call timed out after %s", mcpCallTimeout)
-	}
 }

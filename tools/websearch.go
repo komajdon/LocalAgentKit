@@ -162,7 +162,7 @@ func decodeDDGRedirect(raw string) string {
 
 func (t *webSearchTool) searchBrave(ctx context.Context, query string, count int) ([]searchResult, error) {
 	if t.apiKey == "" {
-		return nil, fmt.Errorf("Brave Search requires an API key (set it in Settings)")
+		return nil, fmt.Errorf("the Brave Search provider requires an API key (set it in Settings)")
 	}
 	endpoint := fmt.Sprintf("https://api.search.brave.com/res/v1/web/search?q=%s&count=%d",
 		url.QueryEscape(query), count)
