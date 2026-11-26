@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,7 +33,7 @@ func lastContent(a *ConversationalAgent, fromEnd int) string {
 }
 
 func TestChatRunsToolAndReturnsAnswer(t *testing.T) {
-	tool := &testutil.FakeTool{ToolName: "echo", Run: func(map[string]string) string { return "pong" }}
+	tool := &testutil.FakeTool{ToolName: "echo", Run: func(domain.Args) string { return "pong" }}
 	p := &testutil.FakeProvider{Replies: []testutil.Reply{reply(call("echo")), reply("done")}}
 	a := newTestAgent(p, tool)
 
@@ -79,11 +81,11 @@ func TestChatDeniedToolDoesNotRun(t *testing.T) {
 }
 
 func TestChatParallelResultsKeepCallOrder(t *testing.T) {
-	slow := &testutil.FakeTool{ToolName: "slow", Run: func(map[string]string) string {
+	slow := &testutil.FakeTool{ToolName: "slow", Run: func(domain.Args) string {
 		time.Sleep(30 * time.Millisecond)
 		return "S"
 	}}
-	fast := &testutil.FakeTool{ToolName: "fast", Run: func(map[string]string) string { return "F" }}
+	fast := &testutil.FakeTool{ToolName: "fast", Run: func(domain.Args) string { return "F" }}
 	p := &testutil.FakeProvider{Replies: []testutil.Reply{reply(call("slow") + call("fast"))}}
 	a := newTestAgent(p, slow, fast)
 	var order []string
@@ -110,10 +112,10 @@ func TestChatUnknownTool(t *testing.T) {
 func TestChatStopsAtIterationLimit(t *testing.T) {
 	var replies []testutil.Reply
 	for i := 0; i < maxToolIterations+5; i++ {
-		replies = append(replies, reply(call("echo")))
+		replies = append(replies, reply(fmt.Sprintf(`TOOL_CALL: {"tool":"echo","args":{"n":%d}}`, i)))
 	}
 	a := newTestAgent(&testutil.FakeProvider{Replies: replies}, &testutil.FakeTool{ToolName: "echo"})
-	if err := a.Chat(context.Background(), "hi"); err == nil {
+	if err := a.Chat(context.Background(), "hi"); !errors.Is(err, ErrIterationLimit) {
 		t.Fatal("want iteration limit error")
 	}
 }
@@ -143,5 +145,86 @@ func TestChatKeepsPartialReplyAndRunsNoToolFromIt(t *testing.T) {
 	}
 	if got := lastContent(a, 0); !strings.Contains(got, "echo") || !strings.HasSuffix(got, interruptedNote) {
 		t.Fatalf("history = %q", got)
+	}
+}
+
+func TestCancelStopsRunningToolsAndRecordsResults(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	block := &testutil.FakeTool{ToolName: "block", RunContext: func(c context.Context, _ domain.Args) string {
+		cancel() // the user presses Stop while the tool runs
+		<-c.Done()
+		return "stopped"
+	}}
+	p := &testutil.FakeProvider{Replies: []testutil.Reply{reply(call("block"))}}
+	a := newTestAgent(p, block)
+	if err := a.Chat(ctx, "hi"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	if got := lastContent(a, 0); !strings.Contains(got, "stopped") {
+		t.Fatalf("history = %q", got)
+	}
+}
+
+func TestStopAtPermissionPromptRunsNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tool := &testutil.FakeTool{ToolName: "echo"}
+	p := &testutil.FakeProvider{Replies: []testutil.Reply{reply(call("echo") + call("echo"))}}
+	a := newTestAgent(p, tool)
+	asked := 0
+	a.OnPermissionRequest = func(PermissionRequest) bool { asked++; cancel(); return true }
+	if err := a.Chat(ctx, "hi"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	results := 0
+	for _, m := range a.Messages() {
+		if strings.Contains(m.Content, canceledResult) {
+			results++
+		}
+	}
+	if tool.Calls() != 0 || asked != 1 || results != 2 {
+		t.Fatalf("calls=%d asked=%d canceled results=%d", tool.Calls(), asked, results)
+	}
+}
+
+func TestRepeatedIdenticalCallEndsRun(t *testing.T) {
+	var replies []testutil.Reply
+	for range 10 {
+		replies = append(replies, reply(call("echo")))
+	}
+	tool := &testutil.FakeTool{ToolName: "echo"}
+	a := newTestAgent(&testutil.FakeProvider{Replies: replies}, tool)
+	if err := a.Chat(context.Background(), "hi"); !errors.Is(err, ErrRepeatedCall) {
+		t.Fatalf("err = %v", err)
+	}
+	if tool.Calls() != maxRepeats-1 {
+		t.Fatalf("calls = %d", tool.Calls())
+	}
+}
+
+func TestParallelToolsAreBoundedAndPanicsContained(t *testing.T) {
+	var running, peak atomic.Int32
+	slow := &testutil.FakeTool{ToolName: "slow", Run: func(domain.Args) string {
+		n := running.Add(1)
+		for {
+			old := peak.Load()
+			if n <= old || peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		running.Add(-1)
+		return "ok"
+	}}
+	boom := &testutil.FakeTool{ToolName: "boom", Run: func(domain.Args) string { panic("kaboom") }}
+	p := &testutil.FakeProvider{Replies: []testutil.Reply{reply(strings.Repeat(call("slow"), 10) + call("boom"))}}
+	a := newTestAgent(p, slow, boom)
+	if err := a.Chat(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if peak.Load() > maxParallelTools || slow.Calls() != 10 {
+		t.Fatalf("peak=%d calls=%d", peak.Load(), slow.Calls())
+	}
+	if got := lastContent(a, 1); !strings.Contains(got, "tool crashed") {
+		t.Fatalf("result = %q", got)
 	}
 }

@@ -50,10 +50,12 @@ func (p *FakeProvider) ListModels() ([]string, error) { return []string{"fake"},
 // FakeTool is a Tool whose behaviour is supplied by Run.
 type FakeTool struct {
 	ToolName string
-	Run      func(args map[string]string) string
+	Run      func(args domain.Args) string
+	// RunContext, when set, replaces Run.
+	RunContext func(ctx context.Context, args domain.Args) string
 
 	mu    sync.Mutex
-	calls []map[string]string
+	calls []domain.Args
 }
 
 func (t *FakeTool) Name() string        { return t.ToolName }
@@ -61,10 +63,13 @@ func (t *FakeTool) Description() string { return "fake tool " + t.ToolName }
 func (t *FakeTool) Parameters() string  { return `{}` }
 
 // Execute records the call and delegates to Run.
-func (t *FakeTool) Execute(args map[string]string) string {
+func (t *FakeTool) Execute(ctx context.Context, args domain.Args) string {
 	t.mu.Lock()
 	t.calls = append(t.calls, args)
 	t.mu.Unlock()
+	if t.RunContext != nil {
+		return t.RunContext(ctx, args)
+	}
 	if t.Run == nil {
 		return "ok"
 	}

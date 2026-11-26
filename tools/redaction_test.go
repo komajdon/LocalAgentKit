@@ -1,10 +1,13 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 	"testing"
+
+	"agent-gui/domain"
 )
 
 type failingTransport struct{}
@@ -20,7 +23,7 @@ func TestSearchErrorsDoNotLeakTheAPIKey(t *testing.T) {
 
 	const key = "serp-super-secret-key"
 	for _, provider := range []string{"serpapi", "brave"} {
-		out := NewWebSearch(provider, key).Execute(map[string]string{"query": "x"})
+		out := NewWebSearch(provider, key).Execute(context.Background(), domain.Args{"query": "x"})
 		if !strings.HasPrefix(out, "ERROR") || strings.Contains(out, key) {
 			t.Errorf("%s leaked the key: %s", provider, out)
 		}

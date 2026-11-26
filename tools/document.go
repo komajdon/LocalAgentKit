@@ -2,6 +2,7 @@ package tools
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -33,18 +34,18 @@ func (t *readDocumentTool) Parameters() string {
 	return `{"path": "path to a .pdf or .docx file (relative to the work directory)"}`
 }
 
-func (t *readDocumentTool) Execute(args map[string]string) string {
-	f, size, err := t.ws.openRegular(args["path"])
+func (t *readDocumentTool) Execute(ctx context.Context, args domain.Args) string {
+	f, size, err := t.ws.openRegular(args.String("path"))
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
 	defer func() { _ = f.Close() }()
 
-	lower := strings.ToLower(args["path"])
+	lower := strings.ToLower(args.String("path"))
 	var text string
 	switch {
 	case strings.HasSuffix(lower, ".pdf"):
-		text, err = extractPDF(f, size)
+		text, err = extractPDF(ctx, f, size)
 	case strings.HasSuffix(lower, ".docx"):
 		text, err = extractDOCX(f, size)
 	default:
@@ -65,7 +66,7 @@ func (t *readDocumentTool) Execute(args map[string]string) string {
 }
 
 // extractPDF returns the document text with "--- Page N ---" markers per page.
-func extractPDF(f io.ReaderAt, size int64) (text string, err error) {
+func extractPDF(ctx context.Context, f io.ReaderAt, size int64) (text string, err error) {
 	// The PDF library panics on some malformed files.
 	defer func() {
 		if p := recover(); p != nil {
@@ -80,6 +81,9 @@ func extractPDF(f io.ReaderAt, size int64) (text string, err error) {
 	var sb strings.Builder
 	total := r.NumPage()
 	for i := 1; i <= total; i++ {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		page := r.Page(i)
 		if page.V.IsNull() {
 			continue

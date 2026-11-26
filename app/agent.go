@@ -1,10 +1,7 @@
 package app
 
 import (
-	"context"
-	"fmt"
 	"strings"
-	"sync"
 
 	"agent-gui/domain"
 )
@@ -20,9 +17,9 @@ type pendingCall struct {
 
 // PermissionRequest is sent to the UI before any tool execution.
 type PermissionRequest struct {
-	Tool        string            `json:"tool"`
-	Description string            `json:"description"`
-	Args        map[string]string `json:"args"`
+	Tool        string      `json:"tool"`
+	Description string      `json:"description"`
+	Args        domain.Args `json:"args"`
 	// ExternalContent is true when the conversation holds output from the web,
 	// a document or an MCP server, which may carry injected instructions.
 	ExternalContent bool `json:"external_content"`
@@ -54,7 +51,7 @@ type ConversationalAgent struct {
 	hasRealUsage          bool // true once any provider call reported usage
 
 	OnChunk             func(string)
-	OnToolCall          func(name string, args map[string]string)
+	OnToolCall          func(name string, args domain.Args)
 	OnToolResult        func(name, result string)
 	OnPermissionRequest func(req PermissionRequest) bool
 	OnContextUsage      func(usage ContextUsage)
@@ -102,118 +99,6 @@ func (a *ConversationalAgent) TokenCount() int {
 		total += len(m.Content)
 	}
 	return total / 4
-}
-
-const maxToolIterations = 50
-
-// interruptedNote ends a reply that was cut off.
-const interruptedNote = "[reply interrupted]"
-
-// Chat runs one user turn, including the tool-use loop.
-func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error {
-	a.conv.Add(domain.Message{Role: domain.RoleUser, Content: userInput})
-	a.emitContextUsage()
-
-	for iteration := 0; iteration < maxToolIterations; iteration++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		// Trim history if context limit is set.
-		if a.contextLimit > 0 {
-			a.trimToContextLimit()
-		}
-
-		response, usage, err := a.provider.ChatStream(ctx, a.model, a.conv.Full(), func(chunk string) {
-			if a.OnChunk != nil {
-				a.OnChunk(chunk)
-			}
-		})
-		if err != nil {
-			// Keep what the user already saw, so history matches the screen.
-			// Tool calls in a partial reply are never run.
-			if response != "" {
-				a.recordUsage(usage)
-				a.conv.Add(domain.Message{Role: domain.RoleAssistant, Content: response + "\n\n" + interruptedNote})
-				a.emitContextUsage()
-			}
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return fmt.Errorf("LLM error: %w", err)
-		}
-		a.recordUsage(usage)
-
-		a.conv.Add(domain.Message{Role: domain.RoleAssistant, Content: response})
-		a.emitContextUsage()
-
-		// Collect every tool call in this response. Permission prompts happen
-		// here, sequentially, so the UI only ever shows one dialog at a time.
-		var pending []*pendingCall
-		for _, line := range strings.Split(response, "\n") {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-
-			tc, ok := domain.ParseToolCall(line)
-			if !ok {
-				continue
-			}
-
-			tool, found := a.registry.Find(tc.Tool)
-			if !found {
-				pending = append(pending, &pendingCall{tc: tc, result: "ERROR: unknown tool '" + tc.Tool + "'"})
-				continue
-			}
-
-			if a.OnPermissionRequest != nil {
-				allowed := a.OnPermissionRequest(PermissionRequest{
-					Tool:            tc.Tool,
-					Description:     tool.Description(),
-					Args:            tc.Args,
-					ExternalContent: hasExternalContent(a.conv.History()),
-				})
-				if !allowed {
-					pending = append(pending, &pendingCall{tc: tc, result: "PERMISSION DENIED by user"})
-					continue
-				}
-			}
-
-			if a.OnToolCall != nil {
-				a.OnToolCall(tc.Tool, tc.Args)
-			}
-			pending = append(pending, &pendingCall{tc: tc, tool: tool, execute: true})
-		}
-
-		if len(pending) == 0 {
-			return nil
-		}
-
-		// Execute all approved tool calls concurrently, then collect their
-		// results. Pre-filled entries (unknown tool / denied) are left as-is.
-		var wg sync.WaitGroup
-		for _, p := range pending {
-			if !p.execute {
-				continue
-			}
-			wg.Add(1)
-			go func(p *pendingCall) {
-				defer wg.Done()
-				p.result = p.tool.Execute(p.tc.Args)
-			}(p)
-		}
-		wg.Wait()
-
-		// Emit results and append to history in the original call order so the
-		// conversation stays deterministic regardless of completion order.
-		for _, p := range pending {
-			if a.OnToolResult != nil {
-				a.OnToolResult(p.tc.Tool, p.result)
-			}
-			a.conv.Add(domain.Message{Role: domain.RoleUser, Content: frameToolResult(p.tc.Tool, sourceOf(p.tc.Tool, p.tc.Args), p.result)})
-		}
-	}
-	return fmt.Errorf("agent exceeded maximum tool iterations (%d) — stopping to prevent a runaway loop", maxToolIterations)
 }
 
 // recordUsage folds one provider usage report into the running totals.

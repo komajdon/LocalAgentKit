@@ -389,14 +389,10 @@ func (a *App) buildAgent(workDir string) *appLayer.ConversationalAgent {
 	agent.OnChunk = func(chunk string) {
 		runtime.EventsEmit(a.ctx, "chat:chunk", chunk)
 	}
-	agent.OnToolCall = func(name string, args map[string]string) {
-		parts := make([]string, 0, len(args))
-		for k, v := range args {
-			parts = append(parts, k+"="+v)
-		}
+	agent.OnToolCall = func(name string, args domain.Args) {
 		runtime.EventsEmit(a.ctx, "chat:tool_call", map[string]any{
 			"tool": name,
-			"args": strings.Join(parts, ", "),
+			"args": args.Format(),
 		})
 	}
 	agent.OnToolResult = func(name, result string) {
@@ -767,12 +763,8 @@ func (a *App) SendMessage(text string) ChatResponse {
 			turnMu.Unlock()
 			origChunk(chunk)
 		}
-		a.agent.OnToolCall = func(name string, args map[string]string) {
-			parts := make([]string, 0, len(args))
-			for k, v := range args {
-				parts = append(parts, k+"="+v)
-			}
-			body := strings.Join(parts, ", ")
+		a.agent.OnToolCall = func(name string, args domain.Args) {
+			body := args.Format()
 			turnMu.Lock()
 			if asstBuf.Len() > 0 {
 				turnItems = append(turnItems, displayItem{

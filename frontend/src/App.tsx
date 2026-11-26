@@ -28,7 +28,7 @@ interface SavedConv extends ConvMeta {
   display_items?: any[]
 }
 interface PermReq {
-  id: string; tool: string; description: string; args: Record<string, string>
+  id: string; tool: string; description: string; args: Record<string, unknown>
   workspace: string; operation: string; target: string; impact: string
   sensitive: boolean; scope: string
 }
@@ -1228,7 +1228,7 @@ export default function App() {
                   <div className="perm-kv">
                     <div className="perm-key">Arguments</div>
                     <div>
-                      {Object.entries(permReq.args).map(([k, v]) => (
+                      {Object.entries(permReq.args).map(([k, raw]) => [k, typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)]).map(([k, v]) => (
                         <div key={k} className="arg-line">
                           <span className="arg-k">{k}</span>
                           <span className="arg-sep">: </span>

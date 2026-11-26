@@ -1,6 +1,10 @@
 package permission
 
-import "testing"
+import (
+	"testing"
+
+	"agent-gui/domain"
+)
 
 type memory struct{ grants []Grant }
 
@@ -16,7 +20,7 @@ func newManager(t *testing.T, p Persistence) *Manager {
 	return m
 }
 
-func cmd(c string) map[string]string { return map[string]string{"command": c} }
+func cmd(c string) domain.Args { return domain.Args{"command": c} }
 
 func TestSettingsOverrideGrants(t *testing.T) {
 	m := newManager(t, nil)
@@ -46,10 +50,10 @@ func TestSensitiveGrantCoversOnlyTheExactCall(t *testing.T) {
 	}
 	different := []struct {
 		workspace, tool string
-		args            map[string]string
+		args            domain.Args
 	}{
 		{"/w", "shell", cmd("ls; rm -rf .")},
-		{"/w", "shell", map[string]string{"command": "ls", "dir": "sub"}},
+		{"/w", "shell", domain.Args{"command": "ls", "dir": "sub"}},
 		{"/other", "shell", cmd("ls")},
 		{"/w", "evil__shell", cmd("ls")},
 	}
@@ -62,10 +66,10 @@ func TestSensitiveGrantCoversOnlyTheExactCall(t *testing.T) {
 
 func TestReadOnlyGrantCoversTool(t *testing.T) {
 	m := newManager(t, nil)
-	if err := m.Remember(ScopeSession, "/w", "read_file", map[string]string{"path": "a"}); err != nil {
+	if err := m.Remember(ScopeSession, "/w", "read_file", domain.Args{"path": "a"}); err != nil {
 		t.Fatal(err)
 	}
-	if m.Check("", "/w", "read_file", map[string]string{"path": "b"}, false) != Allow {
+	if m.Check("", "/w", "read_file", domain.Args{"path": "b"}, false) != Allow {
 		t.Fatal("read-only grant should cover the tool")
 	}
 }

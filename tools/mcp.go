@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,7 +53,7 @@ type jsonRPCResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func startMCPClient(cfg config.MCPServerConfig) (*mcpClient, error) {
+func startMCPClient(ctx context.Context, cfg config.MCPServerConfig) (*mcpClient, error) {
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 
 	// Only pass explicitly configured env vars — do not inherit parent environment.
@@ -108,8 +109,8 @@ func startMCPClient(cfg config.MCPServerConfig) (*mcpClient, error) {
 	p := initParams{ProtocolVersion: "2024-11-05"}
 	p.ClientInfo.Name = "agent-gui"
 	p.ClientInfo.Version = "1.0.0"
-	if _, err := c.call(p); err != nil {
-		_ = cmd.Process.Kill()
+	if _, err := c.callMethod(ctx, "initialize", p); err != nil {
+		c.close()
 		return nil, fmt.Errorf("MCP initialize %q: %w", cfg.Name, err)
 	}
 	_ = c.notify("notifications/initialized", nil)
@@ -160,57 +161,11 @@ func (c *mcpClient) readLoop() {
 	}
 }
 
-func (c *mcpClient) call(params any) (json.RawMessage, error) {
-	id := c.nextID.Add(1)
-	ch := make(chan jsonRPCResponse, 1)
-
-	c.mu.Lock()
-	// Check if server has already exited before registering.
-	select {
-	case <-c.done:
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP server is not running")
-	default:
+// callMethod sends a request and waits for its reply, the call timeout or ctx.
+func (c *mcpClient) callMethod(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	c.pending[id] = ch
-	c.mu.Unlock()
-
-	req := jsonRPCRequest{JSONRPC: "2.0", ID: &id, Method: methodForParams(params), Params: params}
-	data, err := json.Marshal(req)
-	if err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP marshal request: %w", err)
-	}
-	data = append(data, '\n')
-
-	c.writeMu.Lock()
-	_, werr := c.stdin.Write(data)
-	c.writeMu.Unlock()
-	if werr != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, werr
-	}
-
-	select {
-	case resp := <-ch:
-		if resp.Error != nil {
-			return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
-		}
-		return resp.Result, nil
-	case <-time.After(mcpCallTimeout):
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP call timed out after %s", mcpCallTimeout)
-	}
-}
-
-// callMethod sends a method call with explicit method name and params.
-func (c *mcpClient) callMethod(method string, params any) (json.RawMessage, error) {
 	id := c.nextID.Add(1)
 	ch := make(chan jsonRPCResponse, 1)
 
@@ -223,37 +178,40 @@ func (c *mcpClient) callMethod(method string, params any) (json.RawMessage, erro
 	}
 	c.pending[id] = ch
 	c.mu.Unlock()
-
-	req := jsonRPCRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}
-	data, err := json.Marshal(req)
-	if err != nil {
+	forget := func() {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
+	}
+
+	data, err := json.Marshal(jsonRPCRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params})
+	if err != nil {
+		forget()
 		return nil, fmt.Errorf("MCP marshal: %w", err)
 	}
-	data = append(data, '\n')
-
 	c.writeMu.Lock()
-	_, werr := c.stdin.Write(data)
+	_, werr := c.stdin.Write(append(data, '\n'))
 	c.writeMu.Unlock()
 	if werr != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
+		forget()
 		return nil, werr
 	}
 
+	timeout := time.NewTimer(mcpCallTimeout)
+	defer timeout.Stop()
 	select {
 	case resp := <-ch:
 		if resp.Error != nil {
 			return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
 		}
 		return resp.Result, nil
-	case <-time.After(mcpCallTimeout):
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
+	case <-ctx.Done():
+		forget()
+		// Ask the server to stop working on it.
+		_ = c.notify("notifications/cancelled", map[string]any{"requestId": id, "reason": "canceled by user"})
+		return nil, ctx.Err()
+	case <-timeout.C:
+		forget()
 		return nil, fmt.Errorf("MCP call timed out after %s", mcpCallTimeout)
 	}
 }
@@ -283,8 +241,8 @@ func (c *mcpClient) close() {
 }
 
 // ListTools queries the MCP server for its tool list.
-func (c *mcpClient) ListTools() ([]mcpToolDef, error) {
-	raw, err := c.callMethod("tools/list", nil)
+func (c *mcpClient) ListTools(ctx context.Context) ([]mcpToolDef, error) {
+	raw, err := c.callMethod(ctx, "tools/list", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -304,12 +262,12 @@ type mcpToolDef struct {
 }
 
 // CallTool invokes a named tool with the given arguments.
-func (c *mcpClient) CallTool(name string, args map[string]any) (string, error) {
+func (c *mcpClient) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	type callParams struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
 	}
-	raw, err := c.callMethod("tools/call", callParams{Name: name, Arguments: args})
+	raw, err := c.callMethod(ctx, "tools/call", callParams{Name: name, Arguments: args})
 	if err != nil {
 		return "", err
 	}
@@ -350,17 +308,8 @@ func (t *mcpTool) Description() string {
 }
 func (t *mcpTool) Parameters() string { return string(t.def.InputSchema) }
 
-func (t *mcpTool) Execute(args map[string]string) string {
-	anyArgs := make(map[string]any, len(args))
-	for k, v := range args {
-		var parsed any
-		if err := json.Unmarshal([]byte(v), &parsed); err == nil {
-			anyArgs[k] = parsed
-		} else {
-			anyArgs[k] = v
-		}
-	}
-	result, err := t.client.CallTool(t.def.Name, anyArgs)
+func (t *mcpTool) Execute(ctx context.Context, args domain.Args) string {
+	result, err := t.client.CallTool(ctx, t.def.Name, args)
 	if err != nil {
 		return "MCP call failed: " + redact.String(err.Error())
 	}
@@ -401,14 +350,14 @@ func LoadMCPTools(servers []config.MCPServerConfig) []domain.Tool {
 		if !srv.Enabled || srv.Command == "" {
 			continue
 		}
-		client, err := startMCPClient(srv)
+		client, err := startMCPClient(context.Background(), srv)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "MCP: failed to start %q: %v\n", srv.Name, redact.Error(err))
 			continue
 		}
 		newClients = append(newClients, client)
 
-		defs, err := client.ListTools()
+		defs, err := client.ListTools(context.Background())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "MCP: failed to list tools for %q: %v\n", srv.Name, redact.Error(err))
 			client.close()
@@ -435,13 +384,13 @@ func LoadMCPTools(servers []config.MCPServerConfig) []domain.Tool {
 
 // ProbeMCPServer starts a server temporarily, lists its tools, and shuts it down.
 func ProbeMCPServer(cfg config.MCPServerConfig) ([]string, error) {
-	client, err := startMCPClient(cfg)
+	client, err := startMCPClient(context.Background(), cfg)
 	if err != nil {
 		return nil, redact.Error(err)
 	}
 	defer client.close()
 
-	defs, err := client.ListTools()
+	defs, err := client.ListTools(context.Background())
 	if err != nil {
 		return nil, redact.Error(err)
 	}
@@ -450,11 +399,4 @@ func ProbeMCPServer(cfg config.MCPServerConfig) ([]string, error) {
 		names[i] = d.Name
 	}
 	return names, nil
-}
-
-// methodForParams returns the JSON-RPC method name based on struct type.
-// This is only used for the initialize call via call(); all others use callMethod().
-func methodForParams(params any) string {
-	// The only call that goes through call() is initialize.
-	return "initialize"
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"agent-gui/domain"
 	"agent-gui/internal/permission"
 )
 
@@ -29,7 +30,7 @@ func TestGrantStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := map[string]string{"command": "make"}
+	args := domain.Args{"command": "make"}
 	if err := m.Remember(permission.ScopeWorkspace, "/w", "shell", args); err != nil {
 		t.Fatal(err)
 	}

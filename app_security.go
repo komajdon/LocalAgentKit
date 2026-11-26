@@ -7,6 +7,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	appLayer "agent-gui/app"
+	"agent-gui/domain"
 	"agent-gui/internal/permission"
 	"agent-gui/internal/sandbox"
 	"agent-gui/internal/store"
@@ -38,11 +39,11 @@ func (grantStore) Save(grants []permission.Grant) error {
 // PermissionPrompt is what the approval dialog shows. Its ID ties a response
 // to this request, so a late click cannot approve a different one.
 type PermissionPrompt struct {
-	ID          string            `json:"id"`
-	Tool        string            `json:"tool"`
-	Description string            `json:"description"`
-	Args        map[string]string `json:"args"`
-	Workspace   string            `json:"workspace"`
+	ID          string      `json:"id"`
+	Tool        string      `json:"tool"`
+	Description string      `json:"description"`
+	Args        domain.Args `json:"args"`
+	Workspace   string      `json:"workspace"`
 	permission.Details
 }
 

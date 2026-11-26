@@ -34,13 +34,13 @@ func (t *shellTool) Parameters() string {
 	return `{"command": "bash command to run", "dir": "working directory (optional, defaults to conversation work dir)"}`
 }
 
-func (t *shellTool) Execute(args map[string]string) string {
-	command := args["command"]
+func (t *shellTool) Execute(ctx context.Context, args domain.Args) string {
+	command := args.String("command")
 	if len(command) > maxCommandLen {
 		return fmt.Sprintf("ERROR: command exceeds maximum length (%d > %d chars)", len(command), maxCommandLen)
 	}
 
-	dir := args["dir"]
+	dir := args.String("dir")
 	if dir == "" {
 		dir = t.ws.dir
 	}
@@ -51,10 +51,10 @@ func (t *shellTool) Execute(args map[string]string) string {
 		return "ERROR: " + err.Error()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), shellTimeout)
+	runCtx, cancel := context.WithTimeout(ctx, shellTimeout)
 	defer cancel()
 
-	cmd, status, err := sandbox.Command(ctx, t.opts, dir, command)
+	cmd, status, err := sandbox.Command(runCtx, t.opts, dir, command)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
@@ -63,7 +63,10 @@ func (t *shellTool) Execute(args map[string]string) string {
 	err = cmd.Run()
 
 	header := "[" + status.String() + "]\n"
-	if ctx.Err() == context.DeadlineExceeded {
+	if ctx.Err() != nil {
+		return header + "ERROR: command canceled\n" + out.String()
+	}
+	if runCtx.Err() == context.DeadlineExceeded {
 		return header + fmt.Sprintf("ERROR: command timed out after %s\n%s", shellTimeout, out)
 	}
 	if err != nil {

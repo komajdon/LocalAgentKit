@@ -44,9 +44,9 @@ func frameToolResult(tool, source, result string) string {
 }
 
 // sourceOf names where a result came from.
-func sourceOf(tool string, args map[string]string) string {
+func sourceOf(tool string, args domain.Args) string {
 	for _, k := range []string{"path", "query", "command", "url", "pattern"} {
-		if v := args[k]; v != "" {
+		if v := args.String(k); v != "" {
 			return tool + " " + k + "=" + v
 		}
 	}

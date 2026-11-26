@@ -24,3 +24,21 @@ func TestParseToolCall(t *testing.T) {
 		})
 	}
 }
+
+func TestTypedArgumentsSurviveParsing(t *testing.T) {
+	tc, ok := ParseToolCall(`TOOL_CALL: {"tool":"t","args":{"s":"x","n":9007199254740993,"f":1.5,"b":true,"a":[1,2],"o":{"k":"<v>"},"z":null}}`)
+	if !ok {
+		t.Fatal("not parsed")
+	}
+	for key, want := range map[string]string{
+		"s": "x", "n": "9007199254740993", "f": "1.5", "b": "true",
+		"a": "[1,2]", "o": `{"k":"<v>"}`, "z": "", "missing": "",
+	} {
+		if got := tc.Args.String(key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+	if _, ok := ParseToolCall(`TOOL_CALL: {"tool":"t"} {"extra":1}`); ok {
+		t.Error("trailing data accepted")
+	}
+}

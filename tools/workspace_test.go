@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -45,11 +46,11 @@ func symlink(t *testing.T, target, link string) {
 }
 
 func run(tool domain.Tool, kv ...string) string {
-	args := map[string]string{}
+	args := domain.Args{}
 	for i := 0; i < len(kv); i += 2 {
 		args[kv[i]] = kv[i+1]
 	}
-	return tool.Execute(args)
+	return tool.Execute(context.Background(), args)
 }
 
 func refused(t *testing.T, name, out string) {

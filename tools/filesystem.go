@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -43,8 +44,8 @@ func NewDeleteFile(workDir string, protected ...string) domain.Tool {
 func (t *readFileTool) Name() string        { return "read_file" }
 func (t *readFileTool) Description() string { return "Read the contents of a file" }
 func (t *readFileTool) Parameters() string  { return `{"path": "absolute or relative file path"}` }
-func (t *readFileTool) Execute(args map[string]string) string {
-	f, size, err := t.ws.openRegular(args["path"])
+func (t *readFileTool) Execute(ctx context.Context, args domain.Args) string {
+	f, size, err := t.ws.openRegular(args.String("path"))
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
@@ -67,8 +68,8 @@ func (t *writeFileTool) Description() string {
 func (t *writeFileTool) Parameters() string {
 	return `{"path": "file path", "content": "file content"}`
 }
-func (t *writeFileTool) Execute(args map[string]string) string {
-	root, rel, err := t.ws.open(args["path"])
+func (t *writeFileTool) Execute(ctx context.Context, args domain.Args) string {
+	root, rel, err := t.ws.open(args.String("path"))
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
@@ -76,10 +77,10 @@ func (t *writeFileTool) Execute(args map[string]string) string {
 	if err := root.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
 		return "ERROR: " + err.Error()
 	}
-	if err := root.WriteFile(rel, []byte(args["content"]), 0o644); err != nil {
+	if err := root.WriteFile(rel, []byte(args.String("content")), 0o644); err != nil {
 		return "ERROR: " + err.Error()
 	}
-	return fmt.Sprintf("Written %d bytes to %s", len(args["content"]), filepath.Join(t.ws.dir, rel))
+	return fmt.Sprintf("Written %d bytes to %s", len(args.String("content")), filepath.Join(t.ws.dir, rel))
 }
 
 func (t *listDirTool) Name() string        { return "list_dir" }
@@ -87,8 +88,8 @@ func (t *listDirTool) Description() string { return "List files and directories 
 func (t *listDirTool) Parameters() string {
 	return `{"path": "directory path (default: conversation work dir)"}`
 }
-func (t *listDirTool) Execute(args map[string]string) string {
-	target := args["path"]
+func (t *listDirTool) Execute(ctx context.Context, args domain.Args) string {
+	target := args.String("path")
 	if target == "" {
 		target = t.ws.dir
 	}
@@ -122,17 +123,20 @@ func (t *searchFilesTool) Description() string { return "Search for text pattern
 func (t *searchFilesTool) Parameters() string {
 	return `{"pattern": "text to find", "dir": "directory (default: work dir)", "ext": "extension filter e.g. .go (optional)"}`
 }
-func (t *searchFilesTool) Execute(args map[string]string) string {
-	dir := args["dir"]
+func (t *searchFilesTool) Execute(ctx context.Context, args domain.Args) string {
+	dir := args.String("dir")
 	if dir == "" {
 		dir = t.ws.dir
 	}
 
-	ext := args["ext"]
-	pattern := strings.ToLower(args["pattern"])
+	ext := args.String("ext")
+	pattern := strings.ToLower(args.String("pattern"))
 	var results []string
 
 	err := t.ws.walk(dir, func(path, rel string, info fs.FileInfo, root *os.Root) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if ext != "" && !strings.HasSuffix(path, ext) {
 			return nil
 		}
@@ -173,8 +177,8 @@ func (t *searchFilesTool) Execute(args map[string]string) string {
 func (t *deleteFileTool) Name() string        { return "delete_file" }
 func (t *deleteFileTool) Description() string { return "Delete a file" }
 func (t *deleteFileTool) Parameters() string  { return `{"path": "file path to delete"}` }
-func (t *deleteFileTool) Execute(args map[string]string) string {
-	root, rel, err := t.ws.open(args["path"])
+func (t *deleteFileTool) Execute(ctx context.Context, args domain.Args) string {
+	root, rel, err := t.ws.open(args.String("path"))
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}

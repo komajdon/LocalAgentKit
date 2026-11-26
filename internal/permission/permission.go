@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"agent-gui/domain"
 )
 
 // Scope is how long an approval lasts.
@@ -60,29 +62,29 @@ type Details struct {
 }
 
 // Describe summarizes what a call would do.
-func Describe(tool string, args map[string]string) Details {
+func Describe(tool string, args domain.Args) Details {
 	d := Details{Sensitive: !readOnly[tool]}
 	switch tool {
 	case "shell":
-		d.Operation, d.Target = "Run a shell command", args["command"]
+		d.Operation, d.Target = "Run a shell command", args.String("command")
 		d.Impact = "Can change or delete files and run any program the sandbox allows."
 	case "write_file":
-		d.Operation, d.Target = "Write a file", args["path"]
-		d.Impact = fmt.Sprintf("Creates or overwrites the file with %d bytes.", len(args["content"]))
+		d.Operation, d.Target = "Write a file", args.String("path")
+		d.Impact = fmt.Sprintf("Creates or overwrites the file with %d bytes.", len(args.String("content")))
 	case "delete_file":
-		d.Operation, d.Target = "Delete a file", args["path"]
+		d.Operation, d.Target = "Delete a file", args.String("path")
 		d.Impact = "Permanently removes the file."
 	case "search_web":
-		d.Operation, d.Target = "Search the web", args["query"]
+		d.Operation, d.Target = "Search the web", args.String("query")
 		d.Impact = "Sends this query to an external search service."
 	case "read_file", "read_document":
-		d.Operation, d.Target = "Read a file", args["path"]
+		d.Operation, d.Target = "Read a file", args.String("path")
 		d.Impact = "The file's contents are sent to the model provider."
 	case "list_dir":
-		d.Operation, d.Target = "List a directory", args["path"]
+		d.Operation, d.Target = "List a directory", args.String("path")
 		d.Impact = "File names are sent to the model provider."
 	case "search_files":
-		d.Operation, d.Target = "Search files", args["pattern"]
+		d.Operation, d.Target = "Search files", args.String("pattern")
 		d.Impact = "Matching lines are sent to the model provider."
 	case "get_time":
 		d.Operation, d.Impact = "Read the clock", "None."
@@ -109,12 +111,12 @@ type Grant struct {
 }
 
 // grantID identifies the calls that one approval covers.
-func grantID(workspace, tool string, args map[string]string) string {
+func grantID(workspace, tool string, args domain.Args) string {
 	key := []any{workspace, tool}
 	if !readOnly[tool] {
 		key = append(key, args) // encoding/json sorts map keys
 	}
-	// Marshalling strings and string maps cannot fail.
+	// Arguments came from JSON, so marshalling them cannot fail.
 	data, _ := json.Marshal(key)
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -153,7 +155,7 @@ func NewManager(store Persistence) (*Manager, error) {
 // externalContent is true the conversation holds text someone else may have
 // written, so a blanket "allow" no longer covers sensitive tools; they need an
 // approval of the exact call.
-func (m *Manager) Check(setting, workspace, tool string, args map[string]string, externalContent bool) Decision {
+func (m *Manager) Check(setting, workspace, tool string, args domain.Args, externalContent bool) Decision {
 	switch {
 	case setting == SettingDeny:
 		return Deny
@@ -169,7 +171,7 @@ func (m *Manager) Check(setting, workspace, tool string, args map[string]string,
 }
 
 // Remember records an approval. ScopeOnce records nothing.
-func (m *Manager) Remember(scope Scope, workspace, tool string, args map[string]string) error {
+func (m *Manager) Remember(scope Scope, workspace, tool string, args domain.Args) error {
 	if scope != ScopeSession && scope != ScopeWorkspace {
 		return nil
 	}

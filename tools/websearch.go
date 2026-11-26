@@ -53,20 +53,20 @@ type searchResult struct {
 	Snippet string
 }
 
-func (t *webSearchTool) Execute(args map[string]string) string {
-	query := strings.TrimSpace(args["query"])
+func (t *webSearchTool) Execute(ctx context.Context, args domain.Args) string {
+	query := strings.TrimSpace(args.String("query"))
 	if query == "" {
 		return "ERROR: 'query' is required"
 	}
 	count := defaultResults
-	if c, err := strconv.Atoi(strings.TrimSpace(args["count"])); err == nil && c > 0 {
+	if c, err := strconv.Atoi(strings.TrimSpace(args.String("count"))); err == nil && c > 0 {
 		count = c
 	}
 	if count > maxResults {
 		count = maxResults
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), searchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
 	defer cancel()
 
 	var (
