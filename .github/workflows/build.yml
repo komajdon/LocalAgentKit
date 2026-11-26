@@ -14,6 +14,64 @@ env:
   WHISPER_MODEL: "base"
 
 jobs:
+  quality:
+    name: Quality (lint, test, race, vulnerabilities)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config bubblewrap
+      - name: Frontend type check and build
+        run: npm ci && npm run build
+        working-directory: frontend
+      - name: Format
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Vet
+        run: go vet ./...
+      - name: Compile desktop (cgo) code
+        run: go vet -tags desktop,production,webkit2_41 .
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.1
+      - name: Test with race detector
+        run: go test -race -count=1 ./...
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1 ./...
+
+  test-os:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend build
+        run: npm ci && npm run build
+        working-directory: frontend
+      - name: Test
+        run: go test -count=1 ./...
+
   build:
     strategy:
       fail-fast: false
@@ -51,7 +109,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: go.mod
           cache: true
 
       - name: Set up Node
@@ -201,7 +259,7 @@ jobs:
 
       # ── Install Wails and build app ───────────────────────────────────────────
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 
       - name: Skip Wails frontend build (already prebuilt above)
         shell: bash
@@ -448,7 +506,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: go.mod
 
       - name: Install nfpm
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
