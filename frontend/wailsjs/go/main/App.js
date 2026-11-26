@@ -34,6 +34,10 @@ export function GetKeyLocation() {
   return window['go']['main']['App']['GetKeyLocation']();
 }
 
+export function GetMCPStatus() {
+  return window['go']['main']['App']['GetMCPStatus']();
+}
+
 export function GetRunState() {
   return window['go']['main']['App']['GetRunState']();
 }
@@ -104,6 +108,10 @@ export function RenameConversation(arg1, arg2) {
 
 export function RespondPermission(arg1, arg2) {
   return window['go']['main']['App']['RespondPermission'](arg1, arg2);
+}
+
+export function RestartMCPServer(arg1) {
+  return window['go']['main']['App']['RestartMCPServer'](arg1);
 }
 
 export function RevokeAllPermissionGrants() {

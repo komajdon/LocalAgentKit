@@ -159,7 +159,7 @@ func (a *App) GetContextUsage() appLayer.ContextUsage {
 	}
 	// An estimate; MCP servers are not started just to count their schemas.
 	cfg := a.config()
-	return a.agentFor(cfg, conv, a.registryFor(cfg, conv.WorkDir, false)).CurrentUsage()
+	return a.agentFor(cfg, conv, a.registryFor(a.ctx, cfg, conv.WorkDir, nil)).CurrentUsage()
 }
 
 func (a *App) RenameConversation(id, title string) error {

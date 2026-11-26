@@ -447,3 +447,26 @@ export namespace sandbox {
 
 }
 
+export namespace tools {
+	
+	export class MCPStatus {
+	    name: string;
+	    state: string;
+	    tools: string[];
+	    last_error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.state = source["state"];
+	        this.tools = source["tools"];
+	        this.last_error = source["last_error"];
+	    }
+	}
+
+}
+

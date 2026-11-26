@@ -48,8 +48,9 @@ type App struct {
 	restoreStaged bool
 
 	permissions *permission.Manager // set once during startup
-	pending     *pendingPrompt      // guarded by mu
-	promptSeq   uint64              // guarded by mu
+	mcp         *tools.MCPPool
+	pending     *pendingPrompt // guarded by mu
+	promptSeq   uint64         // guarded by mu
 
 	// globalTokens is the account-wide cumulative token count (prompt+completion
 	// across all conversations) backing the shared usage budget. Guarded by mu.
@@ -67,7 +68,7 @@ type App struct {
 func NewApp() *App {
 	// Without a store this cannot fail; startup reloads persisted grants.
 	m, _ := permission.NewManager(nil)
-	a := &App{permissions: m, providerFor: newProvider}
+	a := &App{permissions: m, providerFor: newProvider, mcp: tools.NewMCPPool()}
 	a.emit = func(name string, data any) { runtime.EventsEmit(a.ctx, name, data) }
 	a.logf = func(format string, args ...any) { runtime.LogErrorf(a.ctx, format, args...) }
 	return a
@@ -110,7 +111,7 @@ func (a *App) shutdown(ctx context.Context) {
 			runtime.LogErrorf(ctx, "automatic backup failed: %v", err)
 		}
 	}
-	tools.ShutdownMCPClients()
+	a.mcp.Close()
 	_ = store.Close()
 }
 

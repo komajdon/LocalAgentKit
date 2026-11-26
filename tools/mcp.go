@@ -16,6 +16,7 @@ import (
 	"agent-gui/domain"
 	"agent-gui/internal/config"
 	"agent-gui/internal/redact"
+	"agent-gui/internal/sandbox"
 )
 
 const mcpCallTimeout = 30 * time.Second
@@ -54,7 +55,10 @@ type jsonRPCResponse struct {
 }
 
 func startMCPClient(ctx context.Context, cfg config.MCPServerConfig) (*mcpClient, error) {
-	cmd := exec.Command(cfg.Command, cfg.Args...)
+	// Not tied to ctx: the process outlives the call that started it.
+	cmd := exec.CommandContext(context.Background(), cfg.Command, cfg.Args...)
+	// Launchers such as npx start child processes that must die with them.
+	sandbox.ProcessTree(cmd)
 
 	// Only pass explicitly configured env vars — do not inherit parent environment.
 	// This prevents leaking API keys or secrets from the parent process.
@@ -234,8 +238,8 @@ func (c *mcpClient) close() {
 	// Wait for readLoop to drain pending channels before proceeding.
 	select {
 	case <-c.done:
-	case <-time.After(5 * time.Second):
-		_ = c.cmd.Process.Kill()
+	case <-time.After(2 * time.Second):
+		_ = c.cmd.Cancel()
 	}
 	_ = c.cmd.Wait()
 }
@@ -299,7 +303,7 @@ func (c *mcpClient) CallTool(ctx context.Context, name string, args map[string]a
 type mcpTool struct {
 	serverName string
 	def        mcpToolDef
-	client     *mcpClient
+	entry      *mcpEntry
 }
 
 func (t *mcpTool) Name() string { return t.serverName + "__" + t.def.Name }
@@ -309,88 +313,29 @@ func (t *mcpTool) Description() string {
 func (t *mcpTool) Parameters() string { return string(t.def.InputSchema) }
 
 func (t *mcpTool) Execute(ctx context.Context, args domain.Args) string {
-	result, err := t.client.CallTool(ctx, t.def.Name, args)
+	// Reconnects if the server has exited since the tool was listed.
+	client, err := t.entry.connect(ctx)
+	if err != nil {
+		return "MCP call failed: " + redact.String(err.Error())
+	}
+	result, err := client.CallTool(ctx, t.def.Name, args)
 	if err != nil {
 		return "MCP call failed: " + redact.String(err.Error())
 	}
 	return result
 }
 
-// ── mcpPool holds all live MCP clients for shutdown ─────────────────────────
-
-var (
-	mcpPoolMu        sync.Mutex
-	mcpActiveClients []*mcpClient
-)
-
-// ShutdownMCPClients terminates all running MCP server subprocesses. Call on app exit.
-func ShutdownMCPClients() {
-	mcpPoolMu.Lock()
-	clients := mcpActiveClients
-	mcpActiveClients = nil
-	mcpPoolMu.Unlock()
-
-	var wg sync.WaitGroup
-	for _, c := range clients {
-		wg.Add(1)
-		go func(cl *mcpClient) {
-			defer wg.Done()
-			cl.close()
-		}(c)
-	}
-	wg.Wait()
-}
-
-// LoadMCPTools connects to all enabled MCP servers and returns their tools.
-func LoadMCPTools(servers []config.MCPServerConfig) []domain.Tool {
-	var tools []domain.Tool
-	var newClients []*mcpClient
-
-	for _, srv := range servers {
-		if !srv.Enabled || srv.Command == "" {
-			continue
-		}
-		client, err := startMCPClient(context.Background(), srv)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "MCP: failed to start %q: %v\n", srv.Name, redact.Error(err))
-			continue
-		}
-		newClients = append(newClients, client)
-
-		defs, err := client.ListTools(context.Background())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "MCP: failed to list tools for %q: %v\n", srv.Name, redact.Error(err))
-			client.close()
-			newClients = newClients[:len(newClients)-1]
-			continue
-		}
-		for _, def := range defs {
-			tools = append(tools, &mcpTool{
-				serverName: srv.Name,
-				def:        def,
-				client:     client,
-			})
-		}
-	}
-
-	if len(newClients) > 0 {
-		mcpPoolMu.Lock()
-		mcpActiveClients = append(mcpActiveClients, newClients...)
-		mcpPoolMu.Unlock()
-	}
-
-	return tools
-}
-
 // ProbeMCPServer starts a server temporarily, lists its tools, and shuts it down.
 func ProbeMCPServer(cfg config.MCPServerConfig) ([]string, error) {
-	client, err := startMCPClient(context.Background(), cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpConnectTimeout)
+	defer cancel()
+	client, err := startMCPClient(ctx, cfg)
 	if err != nil {
 		return nil, redact.Error(err)
 	}
 	defer client.close()
 
-	defs, err := client.ListTools(context.Background())
+	defs, err := client.ListTools(ctx)
 	if err != nil {
 		return nil, redact.Error(err)
 	}

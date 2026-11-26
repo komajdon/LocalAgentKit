@@ -75,6 +75,7 @@ func (a *App) SaveConfig(cfg config.Config) string {
 	}
 	a.cfg = cfg
 	a.mu.Unlock()
+	a.mcp.Sync(cfg.MCPServers)
 	return errString(config.Save(cfg))
 }
 
@@ -104,7 +105,24 @@ func (a *App) SaveMCPServers(servers []config.MCPServerConfig) string {
 	a.cfg.MCPServers = servers
 	cfg := a.cfg
 	a.mu.Unlock()
+	a.mcp.Sync(servers) // stop servers that changed or were disabled
 	return errString(config.Save(cfg))
+}
+
+// GetMCPStatus reports the state of each configured server.
+func (a *App) GetMCPStatus() []tools.MCPStatus {
+	return a.mcp.Status(a.config().MCPServers)
+}
+
+// RestartMCPServer (re)starts the named server and rediscovers its tools. It
+// returns an error message or "".
+func (a *App) RestartMCPServer(name string) string {
+	for _, srv := range a.config().MCPServers {
+		if srv.Name == name {
+			return errString(a.mcp.Restart(a.ctx, srv))
+		}
+	}
+	return "no such server"
 }
 
 // ProbeMCPServer starts a server temporarily, lists its tools, and returns their names.

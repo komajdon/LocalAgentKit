@@ -7,9 +7,9 @@ import (
 	"syscall"
 )
 
-// setProcessTree puts the command in its own process group so cancellation
-// also kills the processes it spawned.
-func setProcessTree(cmd *exec.Cmd) {
+// ProcessTree puts a command made with exec.CommandContext in its own process
+// group, so that cmd.Cancel also kills the processes it spawned.
+func ProcessTree(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 }

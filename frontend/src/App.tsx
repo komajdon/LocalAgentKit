@@ -8,7 +8,7 @@ import {
   DeleteConversation, UpdateConversationPath, RenameConversation,
   SearchConversations, ExportConversation, SetConversationModel,
   TruncateAndResend, SetConversationPinned, SetConversationTags,
-  ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, GetRunState, SaveConfig, PickDirectory,
+  ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, GetRunState, GetMCPStatus, RestartMCPServer, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, ProbeMCPServer,
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation,
@@ -258,6 +258,26 @@ export default function App() {
       GetKeyLocation().then(setKeyLocation).catch(() => {})
     }
   }, [showCfg])
+
+  // Live state of the saved servers, polled while the MCP tab is open.
+  const [mcpStatus, setMcpStatus] = useState<{ name: string; state: string; tools: string[]; last_error: string }[]>([])
+  const [mcpRestarting, setMcpRestarting] = useState('')
+  const [mcpRestartError, setMcpRestartError] = useState('')
+  const refreshMcpStatus = useCallback(() => GetMCPStatus().then(s => setMcpStatus((s as any) || [])).catch(() => {}), [])
+  useEffect(() => {
+    if (!showCfg || cfgTab !== 'mcp') return
+    setMcpRestartError('')
+    refreshMcpStatus()
+    const timer = window.setInterval(refreshMcpStatus, 3000)
+    return () => window.clearInterval(timer)
+  }, [showCfg, cfgTab, refreshMcpStatus])
+  const restartMcp = async (name: string) => {
+    setMcpRestarting(name); setMcpRestartError('')
+    const err = await RestartMCPServer(name)
+    setMcpRestarting('')
+    if (err) setMcpRestartError(`${name}: ${err}`)
+    refreshMcpStatus()
+  }
 
   // MCP UI state
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
@@ -1330,6 +1350,26 @@ export default function App() {
                 <button className={`tab ${cfgTab === 'mcp' ? 'active' : ''}`} onClick={() => setCfgTab('mcp')}>MCP Servers</button>
               </div>
             </div>
+
+            {cfgTab === 'mcp' && mcpStatus.length > 0 && (
+              <div style={{ padding: '8px 20px 0' }} aria-label="MCP server status">
+                {mcpStatus.map(s => (
+                  <div key={s.name} className="perm-row">
+                    <div className="perm-row-info">
+                      <div className="perm-tool-name">{s.name} · {mcpRestarting === s.name ? 'starting…' : s.state}</div>
+                      <div className="perm-tool-desc" title={s.last_error || s.tools.join(', ')}>
+                        {s.last_error || (s.state === 'connected' ? `${s.tools.length} tools: ${s.tools.join(', ')}`
+                          : s.state === 'disconnected' ? 'Starts when the agent next runs' : '')}
+                      </div>
+                    </div>
+                    <button className="btn secondary" disabled={s.state === 'disabled' || mcpRestarting !== ''}
+                      onClick={() => restartMcp(s.name)}>Restart</button>
+                  </div>
+                ))}
+                {mcpRestartError && <div role="alert" className="field-hint" style={{ color: 'var(--red)' }}>{mcpRestartError}</div>}
+                <div className="field-hint">Status of the saved configuration. Save after editing a server to apply it.</div>
+              </div>
+            )}
 
             {cfgTab === 'mcp' ? (
               <div className="modal-body">

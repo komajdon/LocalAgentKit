@@ -116,7 +116,7 @@ func Command(ctx context.Context, o Options, dir, command string) (*exec.Cmd, St
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = Environment(os.Environ())
-	setProcessTree(cmd)
+	ProcessTree(cmd)
 	// Do not wait forever for a surviving child that holds the output pipe.
 	cmd.WaitDelay = 2 * time.Second
 	return cmd, status, nil

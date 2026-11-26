@@ -4,6 +4,7 @@ import {history} from '../models';
 import {main} from '../models';
 import {config} from '../models';
 import {app} from '../models';
+import {tools} from '../models';
 import {sandbox} from '../models';
 import {permission} from '../models';
 
@@ -22,6 +23,8 @@ export function GetConfig():Promise<config.Config>;
 export function GetContextUsage():Promise<app.ContextUsage>;
 
 export function GetKeyLocation():Promise<string>;
+
+export function GetMCPStatus():Promise<Array<tools.MCPStatus>>;
 
 export function GetRunState():Promise<main.RunState>;
 
@@ -58,6 +61,8 @@ export function ProbeMCPServer(arg1:config.MCPServerConfig):Promise<Array<string
 export function RenameConversation(arg1:string,arg2:string):Promise<void>;
 
 export function RespondPermission(arg1:string,arg2:string):Promise<void>;
+
+export function RestartMCPServer(arg1:string):Promise<string>;
 
 export function RevokeAllPermissionGrants():Promise<string>;
 

@@ -128,14 +128,14 @@ func (a *App) agentFor(cfg configSnapshot, conv *history.Conversation, registry 
 	return agent
 }
 
-func (a *App) registryFor(cfg configSnapshot, workDir string, withMCP bool) *domain.ToolRegistry {
-	servers := cfg.MCPServers
-	if !withMCP {
-		servers = nil
-	}
+// registryFor builds the tools for a work directory. Without a pool there are
+// no MCP tools and no server is started.
+func (a *App) registryFor(ctx context.Context, cfg configSnapshot, workDir string, pool *tools.MCPPool) *domain.ToolRegistry {
 	return tools.NewRegistry(tools.Options{
 		WorkDir:    workDir,
-		MCPServers: servers,
+		MCPServers: cfg.MCPServers,
+		MCP:        pool,
+		Context:    ctx,
 		Search:     tools.SearchConfig{Provider: cfg.SearchProvider, APIKey: cfg.SearchAPIKey},
 		Sandbox:    sandboxOptions(cfg),
 		Protected:  []string{store.DataDir()},
@@ -213,7 +213,7 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 	defer r.cancel()
 
 	cfg := a.config()
-	agent := a.agentFor(cfg, prior, a.registryFor(cfg, prior.WorkDir, true))
+	agent := a.agentFor(cfg, prior, a.registryFor(r.ctx, cfg, prior.WorkDir, a.mcp))
 	agent.OnChunk = func(chunk string) {
 		a.emitRun(r, "chat:chunk", chunk, func() { r.streaming.WriteString(chunk) })
 	}
