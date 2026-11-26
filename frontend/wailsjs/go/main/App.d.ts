@@ -6,6 +6,7 @@ import {config} from '../models';
 import {app} from '../models';
 import {tools} from '../models';
 import {sandbox} from '../models';
+import {usage} from '../models';
 import {permission} from '../models';
 
 export function BranchConversation(arg1:string,arg2:number):Promise<history.Conversation>;
@@ -32,7 +33,9 @@ export function GetSandboxStatus():Promise<sandbox.Status>;
 
 export function GetStartupError():Promise<string>;
 
-export function GetUsageBudget():Promise<main.UsageBudget>;
+export function GetUsageReport(arg1:usage.Filter):Promise<usage.Report>;
+
+export function GetUsageSettings():Promise<usage.Settings>;
 
 export function GetVersion():Promise<string>;
 
@@ -71,6 +74,8 @@ export function RevokePermissionGrant(arg1:string):Promise<string>;
 export function SaveConfig(arg1:config.Config):Promise<string>;
 
 export function SaveMCPServers(arg1:Array<config.MCPServerConfig>):Promise<string>;
+
+export function SaveUsageSettings(arg1:usage.Settings):Promise<string>;
 
 export function SearchConversations(arg1:string):Promise<Array<history.ConvMeta>>;
 

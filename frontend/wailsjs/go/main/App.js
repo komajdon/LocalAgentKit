@@ -50,8 +50,12 @@ export function GetStartupError() {
   return window['go']['main']['App']['GetStartupError']();
 }
 
-export function GetUsageBudget() {
-  return window['go']['main']['App']['GetUsageBudget']();
+export function GetUsageReport(arg1) {
+  return window['go']['main']['App']['GetUsageReport'](arg1);
+}
+
+export function GetUsageSettings() {
+  return window['go']['main']['App']['GetUsageSettings']();
 }
 
 export function GetVersion() {
@@ -128,6 +132,10 @@ export function SaveConfig(arg1) {
 
 export function SaveMCPServers(arg1) {
   return window['go']['main']['App']['SaveMCPServers'](arg1);
+}
+
+export function SaveUsageSettings(arg1) {
+  return window['go']['main']['App']['SaveUsageSettings'](arg1);
 }
 
 export function SearchConversations(arg1) {

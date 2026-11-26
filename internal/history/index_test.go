@@ -81,9 +81,6 @@ func TestMigrationBacksUpThenIndexes(t *testing.T) {
 	if got := titles(t); got != "B,A" {
 		t.Fatalf("titles = %q", got)
 	}
-	if p, c := TotalUsage(); p != 6 || c != 4 {
-		t.Fatalf("usage = %d,%d", p, c)
-	}
 	made, _ := filepath.Glob(filepath.Join(backups, "pre-migration-v1-*.db"))
 	if len(made) != 1 {
 		t.Fatalf("pre-migration backups = %v", made)

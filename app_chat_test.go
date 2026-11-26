@@ -161,9 +161,6 @@ func TestRunWritesOnlyToItsOwnConversation(t *testing.T) {
 	}
 	var last uint64
 	for _, e := range s.all() {
-		if e.name == "chat:usage_budget" {
-			continue
-		}
 		if e.ev.ConversationID != one || e.ev.RunID != r.id || e.ev.Seq <= last {
 			t.Fatalf("bad event %s %+v", e.name, e.ev)
 		}
@@ -370,7 +367,7 @@ func TestConcurrentAccessIsRaceFree(t *testing.T) {
 			cfg.ToolPermissions = map[string]config.ToolPerm{"shell": config.PermDeny}
 			_ = a.SaveConfig(cfg)
 			_ = a.GetContextUsage()
-			_ = a.GetUsageBudget()
+			_ = a.GetUsageSettings()
 			_ = a.GetRunState()
 			_ = a.SendMessage(id, "again")
 			_, _ = a.ListConversations()

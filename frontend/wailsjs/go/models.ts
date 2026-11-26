@@ -58,9 +58,6 @@ export namespace config {
 	    search_provider: string;
 	    search_api_key: string;
 	    theme: string;
-	    budget_data_gb: number;
-	    budget_fund: number;
-	    fund_per_mtokens: number;
 	    sandbox_mode: string;
 	    sandbox_network: boolean;
 	    tool_calling: string;
@@ -86,9 +83,6 @@ export namespace config {
 	        this.search_provider = source["search_provider"];
 	        this.search_api_key = source["search_api_key"];
 	        this.theme = source["theme"];
-	        this.budget_data_gb = source["budget_data_gb"];
-	        this.budget_fund = source["budget_fund"];
-	        this.fund_per_mtokens = source["fund_per_mtokens"];
 	        this.sandbox_mode = source["sandbox_mode"];
 	        this.sandbox_network = source["sandbox_network"];
 	        this.tool_calling = source["tool_calling"];
@@ -425,28 +419,6 @@ export namespace main {
 	        this.url = source["url"];
 	    }
 	}
-	export class UsageBudget {
-	    tokens: number;
-	    data_total_gb: number;
-	    data_remain_gb: number;
-	    fund_total: number;
-	    fund_remain: number;
-	    fund_unit: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new UsageBudget(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.tokens = source["tokens"];
-	        this.data_total_gb = source["data_total_gb"];
-	        this.data_remain_gb = source["data_remain_gb"];
-	        this.fund_total = source["fund_total"];
-	        this.fund_remain = source["fund_remain"];
-	        this.fund_unit = source["fund_unit"];
-	    }
-	}
 
 }
 
@@ -517,6 +489,201 @@ export namespace tools {
 	        this.tools = source["tools"];
 	        this.last_error = source["last_error"];
 	    }
+	}
+
+}
+
+export namespace usage {
+	
+	export class Entry {
+	    day: string;
+	    provider: string;
+	    model: string;
+	    conversation_id: string;
+	    requests: number;
+	    estimated_requests: number;
+	    input: number;
+	    output: number;
+	    cached: number;
+	    cost: number;
+	    unpriced_requests: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Entry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.day = source["day"];
+	        this.provider = source["provider"];
+	        this.model = source["model"];
+	        this.conversation_id = source["conversation_id"];
+	        this.requests = source["requests"];
+	        this.estimated_requests = source["estimated_requests"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.cached = source["cached"];
+	        this.cost = source["cost"];
+	        this.unpriced_requests = source["unpriced_requests"];
+	    }
+	}
+	export class Filter {
+	    provider: string;
+	    model: string;
+	    conversation_id: string;
+	    from: string;
+	    to: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Filter(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.model = source["model"];
+	        this.conversation_id = source["conversation_id"];
+	        this.from = source["from"];
+	        this.to = source["to"];
+	    }
+	}
+	export class Limits {
+	    run_tokens: number;
+	    run_requests: number;
+	    run_cost: number;
+	    daily_tokens: number;
+	    daily_cost: number;
+	    monthly_tokens: number;
+	    monthly_cost: number;
+	    warn_percent: number;
+	    hard_period_limits: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Limits(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.run_tokens = source["run_tokens"];
+	        this.run_requests = source["run_requests"];
+	        this.run_cost = source["run_cost"];
+	        this.daily_tokens = source["daily_tokens"];
+	        this.daily_cost = source["daily_cost"];
+	        this.monthly_tokens = source["monthly_tokens"];
+	        this.monthly_cost = source["monthly_cost"];
+	        this.warn_percent = source["warn_percent"];
+	        this.hard_period_limits = source["hard_period_limits"];
+	    }
+	}
+	export class Price {
+	    provider: string;
+	    model: string;
+	    input_per_million: number;
+	    output_per_million: number;
+	    cached_per_million: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Price(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.model = source["model"];
+	        this.input_per_million = source["input_per_million"];
+	        this.output_per_million = source["output_per_million"];
+	        this.cached_per_million = source["cached_per_million"];
+	    }
+	}
+	export class Totals {
+	    requests: number;
+	    estimated_requests: number;
+	    input: number;
+	    output: number;
+	    cached: number;
+	    cost: number;
+	    unpriced_requests: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Totals(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.requests = source["requests"];
+	        this.estimated_requests = source["estimated_requests"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.cached = source["cached"];
+	        this.cost = source["cost"];
+	        this.unpriced_requests = source["unpriced_requests"];
+	    }
+	}
+	export class Report {
+	    entries: Entry[];
+	    total: Totals;
+	
+	    static createFrom(source: any = {}) {
+	        return new Report(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.entries = this.convertValues(source["entries"], Entry);
+	        this.total = this.convertValues(source["total"], Totals);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Settings {
+	    currency: string;
+	    prices: Price[];
+	    limits: Limits;
+	
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.currency = source["currency"];
+	        this.prices = this.convertValues(source["prices"], Price);
+	        this.limits = this.convertValues(source["limits"], Limits);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

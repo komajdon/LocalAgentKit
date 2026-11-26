@@ -12,8 +12,9 @@ import {
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, ProbeMCPServer,
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation,
-  GetUsageBudget, GetContextUsage, BranchConversation, ImportConversation,
+  GetContextUsage, BranchConversation, ImportConversation,
 } from '../wailsjs/go/main/App'
+import { UsageDashboard } from './components/UsageDashboard'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -45,7 +46,7 @@ type Item =
   | { type: 'status'; id: number; text: string }
 
 interface ChatEvent { conversation_id: string; run_id: string; seq: number; data: any }
-const CHAT_EVENTS = ['started', 'thinking', 'chunk', 'assistant', 'tool_call', 'tool_result', 'context_usage', 'done', 'stopped', 'error']
+const CHAT_EVENTS = ['started', 'thinking', 'chunk', 'assistant', 'tool_call', 'tool_result', 'context_usage', 'usage_warning', 'done', 'stopped', 'error']
 const FINAL_EVENTS = ['done', 'stopped', 'error']
 const CONV_PAGE = 100
 
@@ -82,17 +83,9 @@ interface Cfg {
   sandbox_network: boolean
   search_api_key: string
   theme: string
-  budget_data_gb: number
-  budget_fund: number
-  fund_per_mtokens: number
 }
 
 interface ContextUsage { used: number; limit: number; total?: number; estimated?: boolean }
-interface UsageBudget {
-  tokens: number
-  data_total_gb: number; data_remain_gb: number
-  fund_total: number; fund_remain: number; fund_unit: string
-}
 interface UpdateInfo { available: boolean; current: string; latest: string; url: string }
 
 let seq = 0
@@ -139,6 +132,7 @@ export default function App() {
   const [items, setItems]     = useState<Item[]>([])
   const [input, setInput]     = useState('')
   // The single run may belong to a conversation other than the one shown.
+  const [showUsage, setShowUsage] = useState(false)
   const [convLimit, setConvLimit] = useState(CONV_PAGE)
   const [runConv, setRunConv] = useState<string | null>(null)
   const running = runConv !== null && runConv === activeId
@@ -175,8 +169,6 @@ export default function App() {
   const [tagEditId, setTagEditId]       = useState<string | null>(null)
   const [tagEditValue, setTagEditValue] = useState('')
 
-  // shared usage budget (data + fund pool)
-  const [budget, setBudget] = useState<UsageBudget | null>(null)
 
   // speech-to-text
   const [whisperReady, setWhisperReady]       = useState(false)
@@ -235,7 +227,6 @@ export default function App() {
     search_provider: 'duckduckgo', search_api_key: '',
     theme: 'dark',
     sandbox_mode: 'auto', sandbox_network: false, tool_calling: 'auto', backup_retention: 7,
-    budget_data_gb: 50, budget_fund: 50, fund_per_mtokens: 1,
   })
 
   // Isolation actually applied to shell commands under the saved settings.
@@ -391,7 +382,6 @@ export default function App() {
     ListMCPServers().then((s: any) => setMcpServers(s || [])).catch(() => {})
     GetVersion().then(v => setAppVersion(v)).catch(() => {})
     CheckForUpdate().then((info: any) => { if (info?.available) setUpdateInfo(info) }).catch(() => {})
-    GetUsageBudget().then((b: any) => setBudget(b)).catch(() => {})
     refreshList()
   }, [])
 
@@ -482,6 +472,9 @@ export default function App() {
       setPermReq(cur => (cur?.id === id ? null : cur))
     }))
 
+    handlers['usage_warning'] = (text: string) =>
+      setItems(prev => [...prev, { type: 'status', id: uid(), text: `Usage warning: ${text}` }])
+
     handlers['context_usage'] = (u: ContextUsage) => setCtxUsage(u)
 
     applyRef.current = (name, data) => handlers[name]?.(data)
@@ -507,7 +500,6 @@ export default function App() {
 
     GetRunState().then(r => { if (r.run_id) setRunConv(r.conversation_id) }).catch(() => {})
 
-    offs.push(EventsOn('chat:usage_budget', (b: UsageBudget) => setBudget(b)))
 
     offs.push(EventsOn('app:fatal', (msg: string) => {
       setFatalError(msg)
@@ -973,6 +965,7 @@ export default function App() {
               aria-label="Settings">⚙️</button>
           ) : (
             <>
+              <button className="foot-btn" onClick={() => setShowUsage(true)}>📊 Usage</button>
               <button className="foot-btn" onClick={() => { setShowCfg(true); setCfgTab('general') }}
                 aria-label="Settings">⚙️ Settings</button>
               <div className="conn-badge">
@@ -1027,14 +1020,8 @@ export default function App() {
                 const warn = pct >= 80
                 const prefix = ctxUsage.estimated ? '~' : ''
                 const totalStr = ctxUsage.total ? ` · ${ctxUsage.total.toLocaleString()} tokens used this conversation` : ''
-                const budgetStr = budget
-                  ? `\n\nShared budget (account-wide):`
-                    + `\n• Data: ${budget.data_remain_gb.toFixed(2)} / ${budget.data_total_gb} GB remaining`
-                    + `\n• Fund: ${budget.fund_remain.toFixed(2)} / ${budget.fund_total} ${budget.fund_unit} remaining`
-                    + `\n• ${budget.tokens.toLocaleString()} tokens used total`
-                  : ''
                 const title = `Context: ${prefix}${ctxUsage.used.toLocaleString()} / ${ctxUsage.limit.toLocaleString()} tokens`
-                  + (ctxUsage.estimated ? ' (estimated)' : ' (actual)') + totalStr + budgetStr
+                  + (ctxUsage.estimated ? ' (estimated)' : ' (actual)') + totalStr
                 return (
                   <div className={`ctx-bar ${warn ? 'warn' : ''}`} title={title}>
                     <div className="ctx-fill" style={{ width: pct + '%' }} />
@@ -1272,6 +1259,8 @@ export default function App() {
       )}
 
       {/* ── Permission request modal ── */}
+      {showUsage && <UsageDashboard conversations={convList} onClose={() => setShowUsage(false)} />}
+
       {permReq && (
         <div className="overlay" role="dialog" aria-modal="true" aria-label="Permission request">
           <div className="modal">
@@ -1687,30 +1676,6 @@ export default function App() {
                   <div className="field-hint">Applies immediately. "Follow OS" tracks your system's light/dark preference.</div>
                 </div>
 
-                <div className="field">
-                  <label>Shared Usage Budget</label>
-                  <div className="budget-grid">
-                    <div>
-                      <span className="budget-sub">Data (GB)</span>
-                      <input type="number" min={0} step={1}
-                        value={cfg.budget_data_gb ?? 50}
-                        onChange={e => setCfg(c => ({ ...c, budget_data_gb: Number(e.target.value) }))} />
-                    </div>
-                    <div>
-                      <span className="budget-sub">Fund (STRRIAL)</span>
-                      <input type="number" min={0} step={1}
-                        value={cfg.budget_fund ?? 50}
-                        onChange={e => setCfg(c => ({ ...c, budget_fund: Number(e.target.value) }))} />
-                    </div>
-                    <div>
-                      <span className="budget-sub">STRRIAL / 1M tokens</span>
-                      <input type="number" min={0} step={0.1}
-                        value={cfg.fund_per_mtokens ?? 1}
-                        onChange={e => setCfg(c => ({ ...c, fund_per_mtokens: Number(e.target.value) }))} />
-                    </div>
-                  </div>
-                  <div className="field-hint">A single account-wide pool consumed by token usage across all conversations. Remaining data/fund is shown in the context-bar tooltip.</div>
-                </div>
 
                 <div className="field">
                   <label>Web Search Provider</label>

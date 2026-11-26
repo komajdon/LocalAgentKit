@@ -112,19 +112,6 @@ func Search(query string) ([]ConvMeta, error) {
 	return results, nil
 }
 
-// TotalUsage sums cumulative token usage across every conversation.
-func TotalUsage() (promptTokens, completionTokens int64) {
-	entries, err := index()
-	if err != nil {
-		return 0, 0
-	}
-	for _, e := range entries {
-		promptTokens += int64(e.TokenUsage.PromptTokens)
-		completionTokens += int64(e.TokenUsage.CompletionTokens)
-	}
-	return promptTokens, completionTokens
-}
-
 // Load retrieves a single conversation by ID.
 func Load(id string) (*Conversation, error) {
 	var c Conversation

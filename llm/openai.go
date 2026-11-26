@@ -51,6 +51,9 @@ type openAIUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	PromptDetails    struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
 }
 
 type openAIChoice struct {
@@ -206,6 +209,7 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 				PromptTokens:     chunk.Usage.PromptTokens,
 				CompletionTokens: chunk.Usage.CompletionTokens,
 				TotalTokens:      chunk.Usage.TotalTokens,
+				CachedTokens:     chunk.Usage.PromptDetails.CachedTokens,
 			}
 		}
 		if chunk.Error != nil {

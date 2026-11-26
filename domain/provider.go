@@ -14,6 +14,8 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// CachedTokens is the part of PromptTokens served from a cache.
+	CachedTokens int `json:"cached_tokens"`
 }
 
 // LLMProvider streams tokens from a language model.

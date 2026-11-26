@@ -236,6 +236,17 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 		return a.authorize(r.ctx, r.convID, prior.WorkDir, req)
 	}
 
+	model := cfg.Model
+	if prior.Model != "" {
+		model = prior.Model
+	}
+	m := a.newMeter(string(cfg.Provider), model, r.convID, func(text string) {
+		a.emitRun(r, "chat:usage_warning", text, func() {
+			r.turn = append(r.turn, displayItem{Type: "status", Data: map[string]any{"text": "Usage warning: " + text}})
+		})
+	})
+	agent.BeforeRequest, agent.OnRequest = m.before, m.record
+
 	a.emitRun(r, "chat:thinking", nil, nil)
 	err := agent.Chat(r.ctx, text)
 	a.finishRun(r, agent, err)
@@ -257,7 +268,6 @@ func (a *App) finishRun(r *run, agent *appLayer.ConversationalAgent, runErr erro
 		event, data, status = "chat:error", msg, displayItem{Type: "error", Data: map[string]any{"text": msg}}
 	}
 
-	var budget *UsageBudget
 	a.convMu.Lock()
 	r.mu.Lock()
 	discard := r.discard
@@ -284,29 +294,18 @@ func (a *App) finishRun(r *run, agent *appLayer.ConversationalAgent, runErr erro
 		if raw, err := json.Marshal(items); err == nil {
 			conv.DisplayItems = raw
 		}
-		oldTotal := int64(conv.TokenUsage.PromptTokens + conv.TokenUsage.CompletionTokens)
 		prompt, completion := agent.Usage()
 		conv.TokenUsage = history.TokenUsage{PromptTokens: prompt, CompletionTokens: completion}
 		conv.UpdatedAt = time.Now()
 		if err := history.Save(conv); err != nil {
 			a.logf("could not save conversation: %v", err)
 		}
-		a.mu.Lock()
-		if delta := int64(prompt+completion) - oldTotal; delta > 0 {
-			a.globalTokens += delta
-		}
-		b := a.computeBudget()
-		a.mu.Unlock()
-		budget = &b
 	}
 	a.mu.Lock()
 	a.run = nil
 	a.mu.Unlock()
 	a.convMu.Unlock()
 
-	if budget != nil {
-		a.emit("chat:usage_budget", *budget)
-	}
 	a.emitRun(r, event, data, nil)
 }
 

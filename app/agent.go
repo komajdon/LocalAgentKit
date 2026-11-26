@@ -25,6 +25,13 @@ type PermissionRequest struct {
 	ExternalContent bool `json:"external_content"`
 }
 
+// RequestUsage is what one model request consumed. Estimated is set when the
+// provider reported nothing.
+type RequestUsage struct {
+	Input, Output, Cached int
+	Estimated             bool
+}
+
 // ContextUsage reports token usage for the current conversation.
 // Used/Limit drive the context bar; Total is the cumulative billed tokens.
 type ContextUsage struct {
@@ -62,6 +69,12 @@ type ConversationalAgent struct {
 	OnAssistantMessage  func(content string)
 	OnPermissionRequest func(req PermissionRequest) bool
 	OnContextUsage      func(usage ContextUsage)
+	// BeforeRequest can refuse a model request, ending the run with its error.
+	BeforeRequest func() error
+	// OnRequest reports what each model request consumed.
+	OnRequest func(RequestUsage)
+	// MaxRounds limits model requests per run; 0 means the default.
+	MaxRounds int
 }
 
 func NewConversationalAgent(

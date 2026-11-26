@@ -20,6 +20,7 @@ import (
 	"agent-gui/internal/permission"
 	"agent-gui/internal/recorder"
 	"agent-gui/internal/store"
+	"agent-gui/internal/usage"
 	"agent-gui/internal/whisper"
 	"agent-gui/tools"
 )
@@ -52,9 +53,7 @@ type App struct {
 	pending     *pendingPrompt // guarded by mu
 	promptSeq   uint64         // guarded by mu
 
-	// globalTokens is the account-wide cumulative token count (prompt+completion
-	// across all conversations) backing the shared usage budget. Guarded by mu.
-	globalTokens int64
+	ledger *usage.Ledger
 
 	recMu  sync.Mutex
 	recSes *recorder.Session
@@ -68,7 +67,7 @@ type App struct {
 func NewApp() *App {
 	// Without a store this cannot fail; startup reloads persisted grants.
 	m, _ := permission.NewManager(nil)
-	a := &App{permissions: m, providerFor: newProvider, mcp: tools.NewMCPPool()}
+	a := &App{permissions: m, providerFor: newProvider, mcp: tools.NewMCPPool(), ledger: usage.NewLedger(usageStore{})}
 	a.emit = func(name string, data any) { runtime.EventsEmit(a.ctx, name, data) }
 	a.logf = func(format string, args ...any) { runtime.LogErrorf(a.ctx, format, args...) }
 	return a
@@ -96,8 +95,6 @@ func (a *App) startup(ctx context.Context) {
 		runtime.LogErrorf(ctx, "saved approvals could not be read; you will be asked again: %v", err)
 	}
 	a.permissions = m
-	p, c := history.TotalUsage()
-	a.globalTokens = p + c
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -382,47 +379,6 @@ func isVisibleSavedMessage(m history.SavedMessage) bool {
 		return visibleReply(m.Content) != ""
 	}
 	return !strings.HasPrefix(m.Content, "TOOL_RESULT")
-}
-
-// UsageBudget is the shared account-wide usage pool: a fixed data + fund
-// allowance consumed by token usage across all conversations.
-type UsageBudget struct {
-	Tokens       int64   `json:"tokens"`         // cumulative tokens used account-wide
-	DataTotalGB  float64 `json:"data_total_gb"`  // total data allowance
-	DataRemainGB float64 `json:"data_remain_gb"` // remaining data
-	FundTotal    float64 `json:"fund_total"`     // total fund allowance
-	FundRemain   float64 `json:"fund_remain"`    // remaining fund
-	FundUnit     string  `json:"fund_unit"`      // currency label for the fund
-}
-
-// computeBudget derives the shared budget from the global token counter and
-// config. One token is treated as ~4 bytes of data; the fund is charged per
-// million tokens. Callers must hold a.mu.
-func (a *App) computeBudget() UsageBudget {
-	tokens := a.globalTokens
-	dataUsedGB := float64(tokens) * 4 / 1e9
-	fundUsed := float64(tokens) / 1e6 * a.cfg.FundPerMTokens
-	clamp := func(v float64) float64 {
-		if v < 0 {
-			return 0
-		}
-		return v
-	}
-	return UsageBudget{
-		Tokens:       tokens,
-		DataTotalGB:  a.cfg.BudgetDataGB,
-		DataRemainGB: clamp(a.cfg.BudgetDataGB - dataUsedGB),
-		FundTotal:    a.cfg.BudgetFund,
-		FundRemain:   clamp(a.cfg.BudgetFund - fundUsed),
-		FundUnit:     "STRRIAL",
-	}
-}
-
-// GetUsageBudget returns the current shared usage budget snapshot.
-func (a *App) GetUsageBudget() UsageBudget {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.computeBudget()
 }
 
 // userMessageIndex returns the slice index of the ordinal-th user message

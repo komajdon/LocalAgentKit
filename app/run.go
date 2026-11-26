@@ -44,12 +44,26 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 
 	var last string
 	repeats := 0
-	for range maxToolIterations {
+	rounds := a.MaxRounds
+	if rounds <= 0 {
+		rounds = maxToolIterations
+	}
+	for range rounds {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if a.BeforeRequest != nil {
+			if err := a.BeforeRequest(); err != nil {
+				return err
+			}
+		}
 
+		input := estimateTokens(a.window())
 		reply, usage, err := a.request(ctx)
+		// A request that produced something was consumed even if it failed.
+		if err == nil || reply.Content != "" {
+			a.reportRequest(input, reply, usage)
+		}
 		if err != nil {
 			// Keep what the user already saw, so history matches the screen.
 			// Tool calls in a partial reply are never run.
@@ -111,7 +125,7 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			return ErrRepeatedCall
 		}
 	}
-	return fmt.Errorf("%w (%d)", ErrIterationLimit, maxToolIterations)
+	return fmt.Errorf("%w (%d)", ErrIterationLimit, rounds)
 }
 
 // request asks the model for its next reply, natively when possible. A model
@@ -166,6 +180,17 @@ func asText(msgs []domain.Message) []domain.Message {
 		}
 	}
 	return out
+}
+
+func (a *ConversationalAgent) reportRequest(estimatedInput int, reply domain.Reply, u *domain.Usage) {
+	if a.OnRequest == nil {
+		return
+	}
+	if u != nil {
+		a.OnRequest(RequestUsage{Input: u.PromptTokens, Output: u.CompletionTokens, Cached: u.CachedTokens})
+		return
+	}
+	a.OnRequest(RequestUsage{Input: estimatedInput, Output: len(reply.Content) / 4, Estimated: true})
 }
 
 // collectCalls validates each call and asks permission. Prompts happen here,
