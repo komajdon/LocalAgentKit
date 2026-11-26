@@ -51,7 +51,7 @@ export function PermissionsTab({ cfg, setCfg, toolList }: Props) {
           })}
         </div>
         <div className="field">
-          <label>Remembered approvals</label>
+          <span className="field-label">Remembered approvals</span>
           {grants.length === 0 && <div className="field-hint">None.</div>}
           {grants.map(g => (
             <div key={g.id} className="perm-row">

@@ -144,7 +144,7 @@ export function UsageDashboard({ conversations, onClose }: Props) {
           {settings && (
             <>
               <div className="field">
-                <label>Prices per million tokens</label>
+                <span className="field-label">Prices per million tokens</span>
                 <label>Currency <input value={settings.currency} onChange={e => patch({ currency: e.target.value })} /></label>
                 {settings.prices.length > 0 && (
                   <div className="usage-table-wrap">
@@ -173,7 +173,7 @@ export function UsageDashboard({ conversations, onClose }: Props) {
               </div>
 
               <div className="field">
-                <label>Limits (0 means none)</label>
+                <span className="field-label">Limits (0 means none)</span>
                 <div className="usage-grid">
                   {LIMIT_FIELDS.map(([key, label]) => (
                     <label key={key}>{label}

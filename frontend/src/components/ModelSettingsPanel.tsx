@@ -40,7 +40,7 @@ export function ModelSettingsPanel({ provider, model, onModels }: Props) {
 
   return (
     <div className="field" aria-label="Connection and model">
-      <label>Connection and model</label>
+      <span className="field-label">Connection and model</span>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button className="btn secondary" disabled={busy} onClick={() => run(async () => {
           const r = await TestConnection()

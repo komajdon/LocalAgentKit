@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   DeleteConversation, RenameConversation, SearchConversations, SetConversationPinned, SetConversationTags,
 } from '../../wailsjs/go/main/App'
+import { activate } from '../activate'
 import type { ConvMeta } from '../types'
 import { groupConvs, shortPath, timeAgo } from '../format'
 
@@ -118,7 +119,7 @@ export function ConversationSidebar({
         <div className="conv-group-label">{label}</div>
         {list.map(c => (
           <div key={c.id} className={`conv-row ${c.id === activeId ? 'active' : ''}`}
-            onClick={() => c.id !== activeId && onOpen(c.id)}>
+            aria-current={c.id === activeId} {...activate(() => { if (c.id !== activeId) onOpen(c.id) }, `Open ${c.title}`)}>
             <div className="conv-row-body">
               {renamingId === c.id ? (
                 <input
@@ -158,7 +159,7 @@ export function ConversationSidebar({
                 <div className="conv-tags">
                   {c.tags.map(t => (
                     <span key={t} className={`conv-tag ${tagFilter === t ? 'active' : ''}`}
-                      onClick={e => { e.stopPropagation(); setTagFilter(tagFilter === t ? null : t) }}>{t}</span>
+                      {...activate(() => setTagFilter(tagFilter === t ? null : t))}>{t}</span>
                   ))}
                 </div>
               )}
@@ -220,9 +221,9 @@ export function ConversationSidebar({
               <div className="tag-filter-bar">
                 {allTags.map(t => (
                   <span key={t} className={`conv-tag ${tagFilter === t ? 'active' : ''}`}
-                    onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</span>
+                    {...activate(() => setTagFilter(tagFilter === t ? null : t))}>{t}</span>
                 ))}
-                {tagFilter && <span className="tag-filter-clear" onClick={() => setTagFilter(null)}>clear ✕</span>}
+                {tagFilter && <span className="tag-filter-clear" {...activate(() => setTagFilter(null))}>clear ✕</span>}
               </div>
             )}
 

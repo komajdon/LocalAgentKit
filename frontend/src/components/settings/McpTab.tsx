@@ -172,20 +172,20 @@ export function McpTab({ mcpServers, setMcpServers }: Props) {
             )}
 
             <div className="field">
-              <label>Name</label>
-              <input value={srv.name} placeholder="e.g. postgres"
+              <label htmlFor="name">Name</label>
+              <input id="name" value={srv.name} placeholder="e.g. postgres"
                 onChange={e => setMcpServers(s => s.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
             </div>
 
             <div className="field">
-              <label>Command</label>
-              <input value={srv.command} placeholder="e.g. npx or uvx or /usr/bin/my-server"
+              <label htmlFor="command">Command</label>
+              <input id="command" value={srv.command} placeholder="e.g. npx or uvx or /usr/bin/my-server"
                 onChange={e => setMcpServers(s => s.map((x, j) => j === i ? { ...x, command: e.target.value } : x))} />
             </div>
 
             <div className="field">
-              <label>Arguments (one per line)</label>
-              <textarea rows={3}
+              <label htmlFor="arguments-one-per-line">Arguments (one per line)</label>
+              <textarea id="arguments-one-per-line" rows={3}
                 value={srv.args.join('\n')}
                 onChange={e => setMcpServers(s => s.map((x, j) =>
                   j === i ? { ...x, args: e.target.value.split('\n').filter(Boolean) } : x))}
@@ -195,8 +195,8 @@ export function McpTab({ mcpServers, setMcpServers }: Props) {
             </div>
 
             <div className="field">
-              <label>Environment variables (KEY=VALUE, one per line)</label>
-              <textarea rows={3}
+              <label htmlFor="environment-variables-key-valu">Environment variables (KEY=VALUE, one per line)</label>
+              <textarea id="environment-variables-key-valu" rows={3}
                 value={Object.entries(srv.env || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
                 onChange={e => {
                   const env: Record<string, string> = {}

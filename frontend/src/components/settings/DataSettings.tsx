@@ -112,7 +112,7 @@ export function DataSettings({ cfg, setCfg, onImported }: Props) {
       </div>
 
       <div className="field">
-        <label>Import Conversations</label>
+        <span className="field-label">Import Conversations</span>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn secondary" onClick={importConversation}
             aria-label="Import conversations from file"

@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Markdown } from './Markdown'
 import './style.css'
+import { activate } from './activate'
 import { shortPath } from './format'
 import { uid, useChatStream } from './hooks/useChatStream'
 import { useSpeech } from './hooks/useSpeech'
@@ -232,13 +233,13 @@ export default function App() {
     setConvList(prev => prev.map(c => c.id === activeId ? { ...c, work_dir: dir } : c))
   }
 
-  const send = useCallback(() => {
+  const send = () => {
     const text = input.trim()
     if (!text || busy || !activeId) return
     setItems(prev => [...prev, { type: 'msg', data: { id: uid(), role: 'user', text } }])
     setInput(''); chat.startedRun(activeId)
     SendMessage(activeId, text).then(r => chat.runRejected(activeId, r.error))
-  }, [input, busy, activeId])
+  }
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
@@ -418,7 +419,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="path-chip" onClick={changePath} title="Click to change working directory">
+              <div className="path-chip" {...activate(changePath)} title="Click to change working directory">
                 📁 <span>{shortPath(activePath)}</span>
               </div>
             </div>
@@ -593,7 +594,7 @@ export default function App() {
               </div>
             )}
             {sttError && (
-              <div className="stt-error" onClick={() => setSttError('')}>⚠ {sttError}</div>
+              <div className="stt-error" {...activate(() => setSttError(''), `Dismiss: ${sttError}`)}>⚠ {sttError}</div>
             )}
           </>
         ) : (

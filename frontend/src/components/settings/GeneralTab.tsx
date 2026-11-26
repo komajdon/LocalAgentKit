@@ -28,8 +28,8 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
   return (
     <div className="modal-body">
       <div className="field">
-        <label>Provider</label>
-        <select value={cfg.provider} onChange={e => setCfg(c => ({ ...c, provider: e.target.value }))}>
+        <label htmlFor="provider">Provider</label>
+        <select id="provider" value={cfg.provider} onChange={e => setCfg(c => ({ ...c, provider: e.target.value }))}>
           <optgroup label="── Free · No API Key ──">
             <option value="ollama">Ollama (local)</option>
             <option value="llm7">LLM7.io — DeepSeek, GPT-4o, Gemini</option>
@@ -56,8 +56,8 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
 
       {(cfg.provider === 'ollama' || cfg.provider === 'openai') && (
         <div className="field">
-          <label>Base URL</label>
-          <input value={cfg.base_url} onChange={e => setCfg(c => ({ ...c, base_url: e.target.value }))}
+          <label htmlFor="base-url">Base URL</label>
+          <input id="base-url" value={cfg.base_url} onChange={e => setCfg(c => ({ ...c, base_url: e.target.value }))}
             placeholder="http://localhost:11434" />
         </div>
       )}
@@ -72,7 +72,7 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
       )}
 
       <div className="field">
-        <label>Default Model</label>
+        <span className="field-label">Default Model</span>
         {models.length > 0
           ? <select value={cfg.model} onChange={e => setCfg(c => ({ ...c, model: e.target.value }))}>
               {(() => {
@@ -98,8 +98,8 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
       </div>
 
       <div className="field">
-        <label>Context Limit (tokens)</label>
-        <input
+        <label htmlFor="context-limit-tokens">Context Limit (tokens)</label>
+        <input id="context-limit-tokens"
           type="number" min={1024} max={131072} step={1024}
           value={cfg.context_limit || 8192}
           onChange={e => setCfg(c => ({ ...c, context_limit: Number(e.target.value) }))}
@@ -108,7 +108,7 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
       </div>
 
       <div className="field">
-        <label>Execution limits per run (0 = default)</label>
+        <span className="field-label">Execution limits per run (0 = default)</span>
         <div className="usage-grid">
           {([['max_rounds', 'Model rounds (50)'], ['max_parallel_tools', 'Tools at once (4)'], ['tool_timeout_seconds', 'Seconds per tool (360)']] as const).map(([k, label]) => (
             <label key={k}>{label}
@@ -120,7 +120,7 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
       </div>
 
       <div className="field">
-        <label>Diagnostics</label>
+        <span className="field-label">Diagnostics</span>
         <button className="btn secondary" onClick={() => ExportDiagnostics().then(r => setDiagMsg(r === 'ok' ? '✓ Diagnostics saved' : r ? '✗ ' + r : ''))}>Export diagnostics…</button>
         <div className="field-hint">Versions, settings without keys or addresses, MCP state and the app log. No conversation content. Nothing is sent anywhere.</div>
         {diagMsg && <div role="status" className="field-hint">{diagMsg}</div>}
@@ -183,8 +183,8 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
       </div>
 
       <div className="field">
-        <label>Theme</label>
-        <select
+        <label htmlFor="theme">Theme</label>
+        <select id="theme"
           value={cfg.theme || 'dark'}
           onChange={e => setCfg(c => ({ ...c, theme: e.target.value }))}
         >
@@ -197,8 +197,8 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
 
 
       <div className="field">
-        <label>Web Search Provider</label>
-        <select
+        <label htmlFor="web-search-provider">Web Search Provider</label>
+        <select id="web-search-provider"
           value={cfg.search_provider || 'duckduckgo'}
           onChange={e => setCfg(c => ({ ...c, search_provider: e.target.value }))}
         >
@@ -222,8 +222,8 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
       )}
 
       <div className="field">
-        <label>System Prompt (optional prefix)</label>
-        <textarea
+        <label htmlFor="system-prompt-optional-prefix">System Prompt (optional prefix)</label>
+        <textarea id="system-prompt-optional-prefix"
           rows={4}
           value={cfg.system_prompt || ''}
           onChange={e => setCfg(c => ({ ...c, system_prompt: e.target.value }))}
@@ -233,8 +233,8 @@ export function GeneralTab({ cfg, setCfg, models, setModels, whisperReady, appVe
       </div>
 
       <div className="field">
-        <label>Whisper Model (speech-to-text)</label>
-        <select value={cfg.whisper_model || 'base'} onChange={e => setCfg(c => ({ ...c, whisper_model: e.target.value }))}>
+        <label htmlFor="whisper-model-speech-to-text">Whisper Model (speech-to-text)</label>
+        <select id="whisper-model-speech-to-text" value={cfg.whisper_model || 'base'} onChange={e => setCfg(c => ({ ...c, whisper_model: e.target.value }))}>
           <option value="tiny">tiny — fastest, lower accuracy (~39 MB)</option>
           <option value="base">base — fast, decent accuracy (~74 MB)</option>
           <option value="small">small — balanced (~244 MB)</option>
