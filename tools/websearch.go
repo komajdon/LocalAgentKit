@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"agent-gui/domain"
+	"agent-gui/internal/redact"
 )
 
 const (
@@ -52,20 +53,20 @@ type searchResult struct {
 	Snippet string
 }
 
-func (t *webSearchTool) Execute(args map[string]string) string {
-	query := strings.TrimSpace(args["query"])
+func (t *webSearchTool) Execute(ctx context.Context, args domain.Args) string {
+	query := strings.TrimSpace(args.String("query"))
 	if query == "" {
 		return "ERROR: 'query' is required"
 	}
 	count := defaultResults
-	if c, err := strconv.Atoi(strings.TrimSpace(args["count"])); err == nil && c > 0 {
+	if c, err := strconv.Atoi(strings.TrimSpace(args.String("count"))); err == nil && c > 0 {
 		count = c
 	}
 	if count > maxResults {
 		count = maxResults
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), searchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
 	defer cancel()
 
 	var (
@@ -81,7 +82,7 @@ func (t *webSearchTool) Execute(args map[string]string) string {
 		results, err = t.searchDuckDuckGo(ctx, query, count)
 	}
 	if err != nil {
-		return fmt.Sprintf("ERROR: web search failed: %v", err)
+		return fmt.Sprintf("ERROR: web search failed: %v", redact.Error(err, t.apiKey))
 	}
 	if len(results) == 0 {
 		return "No results found for: " + query
@@ -162,7 +163,7 @@ func decodeDDGRedirect(raw string) string {
 
 func (t *webSearchTool) searchBrave(ctx context.Context, query string, count int) ([]searchResult, error) {
 	if t.apiKey == "" {
-		return nil, fmt.Errorf("Brave Search requires an API key (set it in Settings)")
+		return nil, fmt.Errorf("the Brave Search provider requires an API key (set it in Settings)")
 	}
 	endpoint := fmt.Sprintf("https://api.search.brave.com/res/v1/web/search?q=%s&count=%d",
 		url.QueryEscape(query), count)

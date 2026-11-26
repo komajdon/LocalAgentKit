@@ -5,6 +5,8 @@ export namespace app {
 	    limit: number;
 	    total: number;
 	    estimated: boolean;
+	    omitted: number;
+	    summarised: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ContextUsage(source);
@@ -16,6 +18,8 @@ export namespace app {
 	        this.limit = source["limit"];
 	        this.total = source["total"];
 	        this.estimated = source["estimated"];
+	        this.omitted = source["omitted"];
+	        this.summarised = source["summarised"];
 	    }
 	}
 
@@ -58,9 +62,14 @@ export namespace config {
 	    search_provider: string;
 	    search_api_key: string;
 	    theme: string;
-	    budget_data_gb: number;
-	    budget_fund: number;
-	    fund_per_mtokens: number;
+	    sandbox_mode: string;
+	    sandbox_network: boolean;
+	    tool_calling: string;
+	    backup_retention: number;
+	    context_strategy: string;
+	    max_rounds: number;
+	    max_parallel_tools: number;
+	    tool_timeout_seconds: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -82,9 +91,14 @@ export namespace config {
 	        this.search_provider = source["search_provider"];
 	        this.search_api_key = source["search_api_key"];
 	        this.theme = source["theme"];
-	        this.budget_data_gb = source["budget_data_gb"];
-	        this.budget_fund = source["budget_fund"];
-	        this.fund_per_mtokens = source["fund_per_mtokens"];
+	        this.sandbox_mode = source["sandbox_mode"];
+	        this.sandbox_network = source["sandbox_network"];
+	        this.tool_calling = source["tool_calling"];
+	        this.backup_retention = source["backup_retention"];
+	        this.context_strategy = source["context_strategy"];
+	        this.max_rounds = source["max_rounds"];
+	        this.max_parallel_tools = source["max_parallel_tools"];
+	        this.tool_timeout_seconds = source["tool_timeout_seconds"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -108,6 +122,51 @@ export namespace config {
 
 }
 
+export namespace domain {
+	
+	export class Capabilities {
+	    native_tools?: boolean;
+	    context_window: number;
+	    streaming: boolean;
+	    usage_reporting: boolean;
+	    model_discovery: boolean;
+	    structured_output?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Capabilities(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.native_tools = source["native_tools"];
+	        this.context_window = source["context_window"];
+	        this.streaming = source["streaming"];
+	        this.usage_reporting = source["usage_reporting"];
+	        this.model_discovery = source["model_discovery"];
+	        this.structured_output = source["structured_output"];
+	    }
+	}
+	export class ToolCall {
+	    id?: string;
+	    tool: string;
+	    args: Record<string, any>;
+	    malformed?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolCall(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.tool = source["tool"];
+	        this.args = source["args"];
+	        this.malformed = source["malformed"];
+	    }
+	}
+
+}
+
 export namespace history {
 	
 	export class ConvMeta {
@@ -115,6 +174,7 @@ export namespace history {
 	    title: string;
 	    work_dir: string;
 	    model?: string;
+	    profile_id?: string;
 	    pinned?: boolean;
 	    tags?: string[];
 	    // Go type: time
@@ -132,6 +192,7 @@ export namespace history {
 	        this.title = source["title"];
 	        this.work_dir = source["work_dir"];
 	        this.model = source["model"];
+	        this.profile_id = source["profile_id"];
 	        this.pinned = source["pinned"];
 	        this.tags = source["tags"];
 	        this.created_at = this.convertValues(source["created_at"], null);
@@ -155,6 +216,67 @@ export namespace history {
 		    }
 		    return a;
 		}
+	}
+	export class ToolRecord {
+	    id: string;
+	    run_id: string;
+	    tool: string;
+	    status: string;
+	    permission?: string;
+	    // Go type: time
+	    started: any;
+	    millis: number;
+	    args: string;
+	    result: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.run_id = source["run_id"];
+	        this.tool = source["tool"];
+	        this.status = source["status"];
+	        this.permission = source["permission"];
+	        this.started = this.convertValues(source["started"], null);
+	        this.millis = source["millis"];
+	        this.args = source["args"];
+	        this.result = source["result"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Summary {
+	    text: string;
+	    covered: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Summary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.covered = source["covered"];
+	    }
 	}
 	export class TokenUsage {
 	    prompt_tokens: number;
@@ -173,6 +295,9 @@ export namespace history {
 	export class SavedMessage {
 	    role: string;
 	    content: string;
+	    tool_calls?: domain.ToolCall[];
+	    tool_call_id?: string;
+	    tool_name?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SavedMessage(source);
@@ -182,13 +307,35 @@ export namespace history {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.role = source["role"];
 	        this.content = source["content"];
+	        this.tool_calls = this.convertValues(source["tool_calls"], domain.ToolCall);
+	        this.tool_call_id = source["tool_call_id"];
+	        this.tool_name = source["tool_name"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Conversation {
 	    id: string;
 	    title: string;
 	    work_dir: string;
 	    model?: string;
+	    profile_id?: string;
 	    pinned?: boolean;
 	    tags?: string[];
 	    // Go type: time
@@ -198,6 +345,8 @@ export namespace history {
 	    messages: SavedMessage[];
 	    display_items?: number[];
 	    token_usage?: TokenUsage;
+	    summary?: Summary;
+	    timeline?: ToolRecord[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -209,6 +358,7 @@ export namespace history {
 	        this.title = source["title"];
 	        this.work_dir = source["work_dir"];
 	        this.model = source["model"];
+	        this.profile_id = source["profile_id"];
 	        this.pinned = source["pinned"];
 	        this.tags = source["tags"];
 	        this.created_at = this.convertValues(source["created_at"], null);
@@ -216,6 +366,8 @@ export namespace history {
 	        this.messages = this.convertValues(source["messages"], SavedMessage);
 	        this.display_items = source["display_items"];
 	        this.token_usage = this.convertValues(source["token_usage"], TokenUsage);
+	        this.summary = this.convertValues(source["summary"], Summary);
+	        this.timeline = this.convertValues(source["timeline"], ToolRecord);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -237,6 +389,8 @@ export namespace history {
 		}
 	}
 	
+	
+	
 
 }
 
@@ -254,6 +408,145 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+	export class ConnectionResult {
+	    ok: boolean;
+	    models: number;
+	    millis: number;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectionResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.models = source["models"];
+	        this.millis = source["millis"];
+	        this.error = source["error"];
+	    }
+	}
+	export class ConversationView {
+	    id: string;
+	    title: string;
+	    work_dir: string;
+	    model?: string;
+	    profile_id?: string;
+	    pinned?: boolean;
+	    tags?: string[];
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
+	    messages: history.SavedMessage[];
+	    display_items?: number[];
+	    token_usage?: history.TokenUsage;
+	    summary?: history.Summary;
+	    timeline?: history.ToolRecord[];
+	    running: boolean;
+	    seq: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConversationView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.work_dir = source["work_dir"];
+	        this.model = source["model"];
+	        this.profile_id = source["profile_id"];
+	        this.pinned = source["pinned"];
+	        this.tags = source["tags"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.messages = this.convertValues(source["messages"], history.SavedMessage);
+	        this.display_items = source["display_items"];
+	        this.token_usage = this.convertValues(source["token_usage"], history.TokenUsage);
+	        this.summary = this.convertValues(source["summary"], history.Summary);
+	        this.timeline = this.convertValues(source["timeline"], history.ToolRecord);
+	        this.running = source["running"];
+	        this.seq = source["seq"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FileChange {
+	    id: string;
+	    // Go type: time
+	    at: any;
+	    path: string;
+	    kind: string;
+	    diff: string;
+	    undoable: boolean;
+	    undone: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileChange(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.at = this.convertValues(source["at"], null);
+	        this.path = source["path"];
+	        this.kind = source["kind"];
+	        this.diff = source["diff"];
+	        this.undoable = source["undoable"];
+	        this.undone = source["undone"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GitStatus {
+	    repository: boolean;
+	    lines: string[];
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GitStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.repository = source["repository"];
+	        this.lines = source["lines"];
+	        this.error = source["error"];
+	    }
+	}
 	export class ModelList {
 	    models: string[];
 	    error?: string;
@@ -266,6 +559,102 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.models = source["models"];
 	        this.error = source["error"];
+	    }
+	}
+	export class ModelOverride {
+	    context_limit: number;
+	    tool_calling: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelOverride(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.context_limit = source["context_limit"];
+	        this.tool_calling = source["tool_calling"];
+	    }
+	}
+	export class ModelProfile {
+	    model: string;
+	    detected: domain.Capabilities;
+	    context_limit: number;
+	    tool_calling: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelProfile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.model = source["model"];
+	        this.detected = this.convertValues(source["detected"], domain.Capabilities);
+	        this.context_limit = source["context_limit"];
+	        this.tool_calling = source["tool_calling"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ModelSettings {
+	    timeout_seconds: number;
+	    overrides: Record<string, ModelOverride>;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.timeout_seconds = source["timeout_seconds"];
+	        this.overrides = this.convertValues(source["overrides"], ModelOverride, true);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RunState {
+	    conversation_id: string;
+	    run_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RunState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.conversation_id = source["conversation_id"];
+	        this.run_id = source["run_id"];
 	    }
 	}
 	export class ToolInfo {
@@ -300,27 +689,328 @@ export namespace main {
 	        this.url = source["url"];
 	    }
 	}
-	export class UsageBudget {
-	    tokens: number;
-	    data_total_gb: number;
-	    data_remain_gb: number;
-	    fund_total: number;
-	    fund_remain: number;
-	    fund_unit: string;
+
+}
+
+export namespace permission {
+	
+	export class Grant {
+	    id: string;
+	    workspace: string;
+	    tool: string;
+	    label: string;
+	    scope: string;
 	
 	    static createFrom(source: any = {}) {
-	        return new UsageBudget(source);
+	        return new Grant(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.tokens = source["tokens"];
-	        this.data_total_gb = source["data_total_gb"];
-	        this.data_remain_gb = source["data_remain_gb"];
-	        this.fund_total = source["fund_total"];
-	        this.fund_remain = source["fund_remain"];
-	        this.fund_unit = source["fund_unit"];
+	        this.id = source["id"];
+	        this.workspace = source["workspace"];
+	        this.tool = source["tool"];
+	        this.label = source["label"];
+	        this.scope = source["scope"];
 	    }
+	}
+
+}
+
+export namespace profile {
+	
+	export class Profile {
+	    id: string;
+	    name: string;
+	    built_in: boolean;
+	    instructions: string;
+	    model: string;
+	    tools: string[];
+	    permissions: Record<string, string>;
+	    context_limit: number;
+	    context_strategy: string;
+	    max_rounds: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Profile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.built_in = source["built_in"];
+	        this.instructions = source["instructions"];
+	        this.model = source["model"];
+	        this.tools = source["tools"];
+	        this.permissions = source["permissions"];
+	        this.context_limit = source["context_limit"];
+	        this.context_strategy = source["context_strategy"];
+	        this.max_rounds = source["max_rounds"];
+	    }
+	}
+	export class Workspace {
+	    id: string;
+	    name: string;
+	    path: string;
+	    profile_id: string;
+	    permissions: Record<string, string>;
+	    ignore: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Workspace(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.profile_id = source["profile_id"];
+	        this.permissions = source["permissions"];
+	        this.ignore = source["ignore"];
+	    }
+	}
+
+}
+
+export namespace sandbox {
+	
+	export class Status {
+	    backend: string;
+	    isolated: boolean;
+	    network_blocked: boolean;
+	    detail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.backend = source["backend"];
+	        this.isolated = source["isolated"];
+	        this.network_blocked = source["network_blocked"];
+	        this.detail = source["detail"];
+	    }
+	}
+
+}
+
+export namespace tools {
+	
+	export class MCPStatus {
+	    name: string;
+	    state: string;
+	    tools: string[];
+	    last_error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.state = source["state"];
+	        this.tools = source["tools"];
+	        this.last_error = source["last_error"];
+	    }
+	}
+
+}
+
+export namespace usage {
+	
+	export class Entry {
+	    day: string;
+	    provider: string;
+	    model: string;
+	    conversation_id: string;
+	    requests: number;
+	    estimated_requests: number;
+	    input: number;
+	    output: number;
+	    cached: number;
+	    cost: number;
+	    unpriced_requests: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Entry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.day = source["day"];
+	        this.provider = source["provider"];
+	        this.model = source["model"];
+	        this.conversation_id = source["conversation_id"];
+	        this.requests = source["requests"];
+	        this.estimated_requests = source["estimated_requests"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.cached = source["cached"];
+	        this.cost = source["cost"];
+	        this.unpriced_requests = source["unpriced_requests"];
+	    }
+	}
+	export class Filter {
+	    provider: string;
+	    model: string;
+	    conversation_id: string;
+	    from: string;
+	    to: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Filter(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.model = source["model"];
+	        this.conversation_id = source["conversation_id"];
+	        this.from = source["from"];
+	        this.to = source["to"];
+	    }
+	}
+	export class Limits {
+	    run_tokens: number;
+	    run_requests: number;
+	    run_cost: number;
+	    daily_tokens: number;
+	    daily_cost: number;
+	    monthly_tokens: number;
+	    monthly_cost: number;
+	    warn_percent: number;
+	    hard_period_limits: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Limits(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.run_tokens = source["run_tokens"];
+	        this.run_requests = source["run_requests"];
+	        this.run_cost = source["run_cost"];
+	        this.daily_tokens = source["daily_tokens"];
+	        this.daily_cost = source["daily_cost"];
+	        this.monthly_tokens = source["monthly_tokens"];
+	        this.monthly_cost = source["monthly_cost"];
+	        this.warn_percent = source["warn_percent"];
+	        this.hard_period_limits = source["hard_period_limits"];
+	    }
+	}
+	export class Price {
+	    provider: string;
+	    model: string;
+	    input_per_million: number;
+	    output_per_million: number;
+	    cached_per_million: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Price(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.model = source["model"];
+	        this.input_per_million = source["input_per_million"];
+	        this.output_per_million = source["output_per_million"];
+	        this.cached_per_million = source["cached_per_million"];
+	    }
+	}
+	export class Totals {
+	    requests: number;
+	    estimated_requests: number;
+	    input: number;
+	    output: number;
+	    cached: number;
+	    cost: number;
+	    unpriced_requests: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Totals(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.requests = source["requests"];
+	        this.estimated_requests = source["estimated_requests"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.cached = source["cached"];
+	        this.cost = source["cost"];
+	        this.unpriced_requests = source["unpriced_requests"];
+	    }
+	}
+	export class Report {
+	    entries: Entry[];
+	    total: Totals;
+	
+	    static createFrom(source: any = {}) {
+	        return new Report(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.entries = this.convertValues(source["entries"], Entry);
+	        this.total = this.convertValues(source["total"], Totals);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Settings {
+	    currency: string;
+	    prices: Price[];
+	    limits: Limits;
+	
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.currency = source["currency"];
+	        this.prices = this.convertValues(source["prices"], Price);
+	        this.limits = this.convertValues(source["limits"], Limits);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

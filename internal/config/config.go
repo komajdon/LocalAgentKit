@@ -23,8 +23,8 @@ const (
 	ProviderSambaNova   ProviderType = "sambanova"
 	ProviderNvidia      ProviderType = "nvidia"
 	// No API key required
-	ProviderLLM7   ProviderType = "llm7"
-	ProviderZAI    ProviderType = "zai"
+	ProviderLLM7 ProviderType = "llm7"
+	ProviderZAI  ProviderType = "zai"
 	// GitHub personal access token (free with any GitHub account)
 	ProviderGitHub ProviderType = "github"
 )
@@ -63,11 +63,20 @@ type Config struct {
 	SearchAPIKey   string `json:"search_api_key"`
 	// UI theme: dark (default) | light | system (follow OS).
 	Theme string `json:"theme"`
-	// Shared usage budget — a single account-wide pool consumed by token usage
-	// across all conversations. Shown as total vs remaining in the context bar.
-	BudgetDataGB   float64 `json:"budget_data_gb"`   // total data allowance (GB)
-	BudgetFund     float64 `json:"budget_fund"`      // total fund allowance (STRRIAL)
-	FundPerMTokens float64 `json:"fund_per_mtokens"` // STRRIAL charged per 1M tokens
+	// Shell isolation: auto (default) | strict | off.
+	SandboxMode string `json:"sandbox_mode"`
+	// SandboxNetwork lets isolated shell commands use the network.
+	SandboxNetwork bool `json:"sandbox_network"`
+	// ToolCalling: auto (native when the model supports it) | text.
+	ToolCalling string `json:"tool_calling"`
+	// BackupRetention is how many automatic backups are kept.
+	BackupRetention int `json:"backup_retention"`
+	// ContextStrategy: sliding (default) | summary | hybrid.
+	ContextStrategy string `json:"context_strategy"`
+	// Execution limits per run; 0 means the built-in default.
+	MaxRounds          int `json:"max_rounds"`
+	MaxParallelTools   int `json:"max_parallel_tools"`
+	ToolTimeoutSeconds int `json:"tool_timeout_seconds"`
 }
 
 func Default() Config {
@@ -82,11 +91,15 @@ func Default() Config {
 		Notifications:   true,
 		SearchProvider:  "duckduckgo",
 		Theme:           "dark",
-		BudgetDataGB:    50,
-		BudgetFund:      50,
-		FundPerMTokens:  1,
+		SandboxMode:     "auto",
+		ToolCalling:     "auto",
+		BackupRetention: DefaultBackupRetention,
+		ContextStrategy: "sliding",
 	}
 }
+
+// DefaultBackupRetention applies when the setting is unset or invalid.
+const DefaultBackupRetention = 7
 
 // Load reads the config from the encrypted store.
 // Returns the default config if none has been saved yet.
@@ -108,14 +121,11 @@ func Load() Config {
 	if cfg.Theme == "" {
 		cfg.Theme = "dark"
 	}
-	if cfg.BudgetDataGB == 0 {
-		cfg.BudgetDataGB = 50
+	if cfg.BackupRetention < 1 {
+		cfg.BackupRetention = DefaultBackupRetention
 	}
-	if cfg.BudgetFund == 0 {
-		cfg.BudgetFund = 50
-	}
-	if cfg.FundPerMTokens == 0 {
-		cfg.FundPerMTokens = 1
+	if cfg.SandboxMode == "" {
+		cfg.SandboxMode = "auto"
 	}
 	return cfg
 }

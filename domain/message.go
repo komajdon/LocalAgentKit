@@ -7,12 +7,19 @@ const (
 	RoleSystem    Role = "system"
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
+	// RoleTool carries the result of a native tool call.
+	RoleTool Role = "tool"
 )
 
 // Message is a single turn in a conversation.
 type Message struct {
 	Role    Role   `json:"role"`
 	Content string `json:"content"`
+	// ToolCalls are the native calls an assistant message made.
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	// ToolCallID and ToolName tie a RoleTool message to its call.
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
 }
 
 // Conversation holds the full history of an exchange.

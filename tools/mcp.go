@@ -15,6 +15,8 @@ import (
 
 	"agent-gui/domain"
 	"agent-gui/internal/config"
+	"agent-gui/internal/redact"
+	"agent-gui/internal/sandbox"
 )
 
 const mcpCallTimeout = 30 * time.Second
@@ -29,6 +31,7 @@ type mcpClient struct {
 	pending map[int64]chan jsonRPCResponse
 	nextID  atomic.Int64
 	done    chan struct{} // closed when readLoop exits
+	stale   atomic.Bool   // the server says its tool list changed
 
 	// writeMu serialises writes to stdin so concurrent tool calls (parallel
 	// tool execution) cannot interleave bytes of different JSON-RPC frames.
@@ -45,6 +48,7 @@ type jsonRPCRequest struct {
 type jsonRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int64           `json:"id"`
+	Method  string          `json:"method,omitempty"` // set on server messages
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *struct {
 		Code    int    `json:"code"`
@@ -52,8 +56,11 @@ type jsonRPCResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func startMCPClient(cfg config.MCPServerConfig) (*mcpClient, error) {
-	cmd := exec.Command(cfg.Command, cfg.Args...)
+func startMCPClient(ctx context.Context, cfg config.MCPServerConfig) (*mcpClient, error) {
+	// Not tied to ctx: the process outlives the call that started it.
+	cmd := exec.CommandContext(context.Background(), cfg.Command, cfg.Args...)
+	// Launchers such as npx start child processes that must die with them.
+	sandbox.ProcessTree(cmd)
 
 	// Only pass explicitly configured env vars — do not inherit parent environment.
 	// This prevents leaking API keys or secrets from the parent process.
@@ -108,8 +115,8 @@ func startMCPClient(cfg config.MCPServerConfig) (*mcpClient, error) {
 	p := initParams{ProtocolVersion: "2024-11-05"}
 	p.ClientInfo.Name = "agent-gui"
 	p.ClientInfo.Version = "1.0.0"
-	if _, err := c.call(p); err != nil {
-		_ = cmd.Process.Kill()
+	if _, err := c.callMethod(ctx, "initialize", p); err != nil {
+		c.close()
 		return nil, fmt.Errorf("MCP initialize %q: %w", cfg.Name, err)
 	}
 	_ = c.notify("notifications/initialized", nil)
@@ -148,6 +155,13 @@ func (c *mcpClient) readLoop() {
 			fmt.Fprintf(os.Stderr, "MCP: invalid JSON from server: %v\n", err)
 			continue
 		}
+		if resp.Method != "" {
+			// A notification or request from the server, not a reply.
+			if resp.Method == "notifications/tools/list_changed" {
+				c.stale.Store(true)
+			}
+			continue
+		}
 		c.mu.Lock()
 		ch, ok := c.pending[resp.ID]
 		if ok {
@@ -160,57 +174,19 @@ func (c *mcpClient) readLoop() {
 	}
 }
 
-func (c *mcpClient) call(params any) (json.RawMessage, error) {
-	id := c.nextID.Add(1)
-	ch := make(chan jsonRPCResponse, 1)
-
-	c.mu.Lock()
-	// Check if server has already exited before registering.
-	select {
-	case <-c.done:
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP server is not running")
-	default:
-	}
-	c.pending[id] = ch
-	c.mu.Unlock()
-
-	req := jsonRPCRequest{JSONRPC: "2.0", ID: &id, Method: methodForParams(params), Params: params}
-	data, err := json.Marshal(req)
-	if err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP marshal request: %w", err)
-	}
-	data = append(data, '\n')
-
-	c.writeMu.Lock()
-	_, werr := c.stdin.Write(data)
-	c.writeMu.Unlock()
-	if werr != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, werr
-	}
-
-	select {
-	case resp := <-ch:
-		if resp.Error != nil {
-			return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
-		}
-		return resp.Result, nil
-	case <-time.After(mcpCallTimeout):
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP call timed out after %s", mcpCallTimeout)
-	}
+// rpcError is an error reply from the server, as opposed to no reply.
+type rpcError struct {
+	code    int
+	message string
 }
 
-// callMethod sends a method call with explicit method name and params.
-func (c *mcpClient) callMethod(method string, params any) (json.RawMessage, error) {
+func (e *rpcError) Error() string { return fmt.Sprintf("MCP error %d: %s", e.code, e.message) }
+
+// callMethod sends a request and waits for its reply, the call timeout or ctx.
+func (c *mcpClient) callMethod(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	id := c.nextID.Add(1)
 	ch := make(chan jsonRPCResponse, 1)
 
@@ -223,37 +199,40 @@ func (c *mcpClient) callMethod(method string, params any) (json.RawMessage, erro
 	}
 	c.pending[id] = ch
 	c.mu.Unlock()
-
-	req := jsonRPCRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}
-	data, err := json.Marshal(req)
-	if err != nil {
+	forget := func() {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
+	}
+
+	data, err := json.Marshal(jsonRPCRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params})
+	if err != nil {
+		forget()
 		return nil, fmt.Errorf("MCP marshal: %w", err)
 	}
-	data = append(data, '\n')
-
 	c.writeMu.Lock()
-	_, werr := c.stdin.Write(data)
+	_, werr := c.stdin.Write(append(data, '\n'))
 	c.writeMu.Unlock()
 	if werr != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
+		forget()
 		return nil, werr
 	}
 
+	timeout := time.NewTimer(mcpCallTimeout)
+	defer timeout.Stop()
 	select {
 	case resp := <-ch:
 		if resp.Error != nil {
-			return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
+			return nil, &rpcError{resp.Error.Code, resp.Error.Message}
 		}
 		return resp.Result, nil
-	case <-time.After(mcpCallTimeout):
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
+	case <-ctx.Done():
+		forget()
+		// Ask the server to stop working on it.
+		_ = c.notify("notifications/cancelled", map[string]any{"requestId": id, "reason": "canceled by user"})
+		return nil, ctx.Err()
+	case <-timeout.C:
+		forget()
 		return nil, fmt.Errorf("MCP call timed out after %s", mcpCallTimeout)
 	}
 }
@@ -276,15 +255,15 @@ func (c *mcpClient) close() {
 	// Wait for readLoop to drain pending channels before proceeding.
 	select {
 	case <-c.done:
-	case <-time.After(5 * time.Second):
-		_ = c.cmd.Process.Kill()
+	case <-time.After(2 * time.Second):
+		_ = c.cmd.Cancel()
 	}
 	_ = c.cmd.Wait()
 }
 
 // ListTools queries the MCP server for its tool list.
-func (c *mcpClient) ListTools() ([]mcpToolDef, error) {
-	raw, err := c.callMethod("tools/list", nil)
+func (c *mcpClient) ListTools(ctx context.Context) ([]mcpToolDef, error) {
+	raw, err := c.callMethod(ctx, "tools/list", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -304,12 +283,12 @@ type mcpToolDef struct {
 }
 
 // CallTool invokes a named tool with the given arguments.
-func (c *mcpClient) CallTool(name string, args map[string]any) (string, error) {
+func (c *mcpClient) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	type callParams struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
 	}
-	raw, err := c.callMethod("tools/call", callParams{Name: name, Arguments: args})
+	raw, err := c.callMethod(ctx, "tools/call", callParams{Name: name, Arguments: args})
 	if err != nil {
 		return "", err
 	}
@@ -341,172 +320,45 @@ func (c *mcpClient) CallTool(name string, args map[string]any) (string, error) {
 type mcpTool struct {
 	serverName string
 	def        mcpToolDef
-	client     *mcpClient
+	entry      *mcpEntry
 }
 
-func (t *mcpTool) Name() string        { return t.serverName + "__" + t.def.Name }
-func (t *mcpTool) Description() string { return fmt.Sprintf("[MCP:%s] %s", t.serverName, t.def.Description) }
-func (t *mcpTool) Parameters() string  { return string(t.def.InputSchema) }
+func (t *mcpTool) Name() string { return t.serverName + "__" + t.def.Name }
+func (t *mcpTool) Description() string {
+	return fmt.Sprintf("[MCP:%s] %s", t.serverName, t.def.Description)
+}
+func (t *mcpTool) Parameters() string { return string(t.def.InputSchema) }
 
-func (t *mcpTool) Execute(args map[string]string) string {
-	anyArgs := make(map[string]any, len(args))
-	for k, v := range args {
-		var parsed any
-		if err := json.Unmarshal([]byte(v), &parsed); err == nil {
-			anyArgs[k] = parsed
-		} else {
-			anyArgs[k] = v
-		}
-	}
-	result, err := t.client.CallTool(t.def.Name, anyArgs)
+func (t *mcpTool) Execute(ctx context.Context, args domain.Args) string {
+	// Reconnects if the server has exited since the tool was listed.
+	client, err := t.entry.connect(ctx)
 	if err != nil {
-		return "MCP call failed: " + err.Error()
+		return "MCP call failed: " + redact.String(err.Error())
+	}
+	result, err := client.CallTool(ctx, t.def.Name, args)
+	if err != nil {
+		return "MCP call failed: " + redact.String(err.Error())
 	}
 	return result
 }
 
-// ── mcpPool holds all live MCP clients for shutdown ─────────────────────────
-
-var (
-	mcpPoolMu      sync.Mutex
-	mcpActiveClients []*mcpClient
-)
-
-// ShutdownMCPClients terminates all running MCP server subprocesses. Call on app exit.
-func ShutdownMCPClients() {
-	mcpPoolMu.Lock()
-	clients := mcpActiveClients
-	mcpActiveClients = nil
-	mcpPoolMu.Unlock()
-
-	var wg sync.WaitGroup
-	for _, c := range clients {
-		wg.Add(1)
-		go func(cl *mcpClient) {
-			defer wg.Done()
-			cl.close()
-		}(c)
-	}
-	wg.Wait()
-}
-
-// LoadMCPTools connects to all enabled MCP servers and returns their tools.
-func LoadMCPTools(servers []config.MCPServerConfig) []domain.Tool {
-	var tools []domain.Tool
-	var newClients []*mcpClient
-
-	for _, srv := range servers {
-		if !srv.Enabled || srv.Command == "" {
-			continue
-		}
-		client, err := startMCPClient(srv)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "MCP: failed to start %q: %v\n", srv.Name, err)
-			continue
-		}
-		newClients = append(newClients, client)
-
-		defs, err := client.ListTools()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "MCP: failed to list tools for %q: %v\n", srv.Name, err)
-			client.close()
-			newClients = newClients[:len(newClients)-1]
-			continue
-		}
-		for _, def := range defs {
-			tools = append(tools, &mcpTool{
-				serverName: srv.Name,
-				def:        def,
-				client:     client,
-			})
-		}
-	}
-
-	if len(newClients) > 0 {
-		mcpPoolMu.Lock()
-		mcpActiveClients = append(mcpActiveClients, newClients...)
-		mcpPoolMu.Unlock()
-	}
-
-	return tools
-}
-
 // ProbeMCPServer starts a server temporarily, lists its tools, and shuts it down.
 func ProbeMCPServer(cfg config.MCPServerConfig) ([]string, error) {
-	client, err := startMCPClient(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpConnectTimeout)
+	defer cancel()
+	client, err := startMCPClient(ctx, cfg)
 	if err != nil {
-		return nil, err
+		return nil, redact.Error(err)
 	}
 	defer client.close()
 
-	defs, err := client.ListTools()
+	defs, err := client.ListTools(ctx)
 	if err != nil {
-		return nil, err
+		return nil, redact.Error(err)
 	}
 	names := make([]string, len(defs))
 	for i, d := range defs {
 		names[i] = d.Name
 	}
 	return names, nil
-}
-
-// methodForParams returns the JSON-RPC method name based on struct type.
-// This is only used for the initialize call via call(); all others use callMethod().
-func methodForParams(params any) string {
-	// The only call that goes through call() is initialize.
-	return "initialize"
-}
-
-// contextCallMethod is a context-aware version for future use.
-func (c *mcpClient) contextCallMethod(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	id := c.nextID.Add(1)
-	ch := make(chan jsonRPCResponse, 1)
-
-	c.mu.Lock()
-	select {
-	case <-c.done:
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP server is not running")
-	default:
-	}
-	c.pending[id] = ch
-	c.mu.Unlock()
-
-	req := jsonRPCRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}
-	data, err := json.Marshal(req)
-	if err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, err
-	}
-	data = append(data, '\n')
-
-	c.writeMu.Lock()
-	_, werr := c.stdin.Write(data)
-	c.writeMu.Unlock()
-	if werr != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, werr
-	}
-
-	select {
-	case resp := <-ch:
-		if resp.Error != nil {
-			return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
-		}
-		return resp.Result, nil
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, ctx.Err()
-	case <-time.After(mcpCallTimeout):
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, fmt.Errorf("MCP call timed out after %s", mcpCallTimeout)
-	}
 }

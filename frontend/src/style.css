@@ -792,7 +792,7 @@ body {
 /* Fields */
 .field { display: flex; flex-direction: column; gap: 6px; }
 
-.field label {
+.field label, .field .field-label {
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1143,11 +1143,6 @@ body {
 .tag-filter-clear { font-size: 10px; color: var(--text3); cursor: pointer; margin-left: 2px; }
 .tag-filter-clear:hover { color: var(--text); }
 
-/* ── Usage budget settings ────────────────────────────────────────────── */
-.budget-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.budget-grid input { width: 100%; }
-.budget-sub { display: block; font-size: 11px; color: var(--text2); margin-bottom: 3px; }
-
 /* ── Thinking indicator ───────────────────────────────────────────────── */
 .thinking-dots { display: inline-flex; gap: 4px; align-items: center; padding: 2px 0; }
 .thinking-dots span {
@@ -1208,3 +1203,23 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible), select:focus:
   color: var(--text2); cursor: pointer; font-size: 16px; padding: 0 4px;
 }
 .fatal-banner button:hover { color: var(--text); }
+
+/* ── Usage dashboard ──────────────────────────────────────────────────── */
+.modal.wide { width: min(920px, 94vw); max-width: 94vw; }
+.usage-filters, .usage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.usage-filters label, .usage-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text2); }
+.usage-table-wrap { overflow-x: auto; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12px; color: var(--text); }
+.usage-table th, .usage-table td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--border2); white-space: nowrap; }
+.usage-table th:nth-child(-n+4), .usage-table td:nth-child(-n+4) { text-align: left; }
+.usage-table input { width: 100%; min-width: 80px; }
+.timeline-row { border: 1px solid var(--border2); border-radius: 8px; padding: 6px 10px; margin-top: 6px; font-size: 12px; color: var(--text); }
+.timeline-row summary { display: flex; gap: 12px; flex-wrap: wrap; cursor: pointer; }
+.timeline-row pre { white-space: pre-wrap; max-height: 220px; overflow: auto; }
+.timeline-status { font-weight: 700; }
+.timeline-status.succeeded { color: var(--green); }
+.timeline-status.failed, .timeline-status.denied, .timeline-status.rejected { color: var(--red); }
+.diff-view { font-size: 11px; max-height: 260px; overflow: auto; white-space: pre-wrap; background: var(--surface2); border-radius: 6px; padding: 8px; color: var(--text); }
+.diff-view .add { color: var(--green); }
+.diff-view .del { color: var(--red); }
+.diff-view .head { color: var(--text2); }

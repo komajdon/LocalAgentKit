@@ -1,12 +1,21 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrInterrupted reports a reply that stopped before the provider finished it.
+// ChatStream returns the text received so far along with it.
+var ErrInterrupted = errors.New("the model's reply was interrupted")
 
 // Usage reports token counts returned by the provider for one completion.
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// CachedTokens is the part of PromptTokens served from a cache.
+	CachedTokens int `json:"cached_tokens"`
 }
 
 // LLMProvider streams tokens from a language model.
@@ -15,4 +24,44 @@ type Usage struct {
 type LLMProvider interface {
 	ChatStream(ctx context.Context, model string, messages []Message, onChunk func(string)) (string, *Usage, error)
 	ListModels() ([]string, error)
+}
+
+// ToolSpec describes a tool to a provider with native tool calling.
+type ToolSpec struct {
+	Name        string
+	Description string
+	Parameters  []byte // JSON schema
+}
+
+// Reply is a model response that may request tool calls.
+type Reply struct {
+	Content   string
+	ToolCalls []ToolCall
+}
+
+// ToolCallingProvider is a provider with native tool calling. It returns
+// ErrToolsUnsupported when the server or model rejects the tools, before any
+// output, so the caller can fall back to the text protocol.
+type ToolCallingProvider interface {
+	LLMProvider
+	ChatTools(ctx context.Context, model string, messages []Message, tools []ToolSpec, onChunk func(string)) (Reply, *Usage, error)
+}
+
+// ErrToolsUnsupported reports that native tool calling is not available.
+var ErrToolsUnsupported = errors.New("this model does not support native tool calling")
+
+// Capabilities describes what a provider can do with one model. A nil or zero
+// field means it could not be determined.
+type Capabilities struct {
+	NativeTools      *bool `json:"native_tools"`
+	ContextWindow    int   `json:"context_window"`
+	Streaming        bool  `json:"streaming"`
+	UsageReporting   bool  `json:"usage_reporting"`
+	ModelDiscovery   bool  `json:"model_discovery"`
+	StructuredOutput *bool `json:"structured_output"`
+}
+
+// ModelDescriber is a provider that can report a model's capabilities.
+type ModelDescriber interface {
+	Describe(ctx context.Context, model string) (Capabilities, error)
 }

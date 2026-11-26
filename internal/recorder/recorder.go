@@ -25,7 +25,9 @@ func Start() (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		return nil, err
+	}
 
 	recorder, args := buildCmd(f.Name())
 	cmd := exec.Command(recorder, args...)
@@ -37,7 +39,7 @@ func Start() (*Session, error) {
 	}
 
 	if err := cmd.Start(); err != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name())
 		return nil, fmt.Errorf("start recorder: %w", err)
 	}
 
@@ -59,7 +61,7 @@ func (s *Session) Stop() ([]byte, error) {
 		_ = s.cmd.Process.Signal(os.Interrupt)
 	}
 	<-s.done
-	defer os.Remove(s.outFile)
+	defer func() { _ = os.Remove(s.outFile) }()
 
 	data, err := os.ReadFile(s.outFile)
 	if err != nil {
@@ -76,9 +78,9 @@ func (s *Session) Stop() ([]byte, error) {
 func buildCmd(outFile string) (string, []string) {
 	if p, err := exec.LookPath("arecord"); err == nil {
 		return p, []string{
-			"-f", "S16_LE",  // 16-bit signed little-endian
-			"-r", "16000",   // 16 kHz
-			"-c", "1",       // mono
+			"-f", "S16_LE", // 16-bit signed little-endian
+			"-r", "16000", // 16 kHz
+			"-c", "1", // mono
 			"-t", "wav",
 			outFile,
 		}

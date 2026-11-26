@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-gui/domain"
 	"agent-gui/internal/store"
 )
 
@@ -16,6 +17,7 @@ type ConvMeta struct {
 	Title     string    `json:"title"`
 	WorkDir   string    `json:"work_dir"`
 	Model     string    `json:"model,omitempty"` // per-conversation model override
+	ProfileID string    `json:"profile_id,omitempty"`
 	Pinned    bool      `json:"pinned,omitempty"`
 	Tags      []string  `json:"tags,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -23,8 +25,23 @@ type ConvMeta struct {
 }
 
 type SavedMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	ToolCalls  []domain.ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	ToolName   string            `json:"tool_name,omitempty"`
+}
+
+// Message converts to the agent's form.
+func (m SavedMessage) Message() domain.Message {
+	return domain.Message{Role: domain.Role(m.Role), Content: m.Content,
+		ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID, ToolName: m.ToolName}
+}
+
+// Saved converts an agent message to its stored form.
+func Saved(m domain.Message) SavedMessage {
+	return SavedMessage{Role: string(m.Role), Content: m.Content,
+		ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID, ToolName: m.ToolName}
 }
 
 // TokenUsage stores cumulative real token counts for a conversation.
@@ -38,75 +55,85 @@ type Conversation struct {
 	Messages     []SavedMessage  `json:"messages"`
 	DisplayItems json.RawMessage `json:"display_items,omitempty"`
 	TokenUsage   TokenUsage      `json:"token_usage,omitempty"`
+	Summary      *Summary        `json:"summary,omitempty"`
+	Timeline     []ToolRecord    `json:"timeline,omitempty"`
 }
 
-// List returns metadata for all conversations, sorted newest-first.
-func List() ([]ConvMeta, error) {
-	var metas []ConvMeta
-	err := store.Scan(bucket, func(_ string, raw []byte) error {
-		var c Conversation
-		if err := json.Unmarshal(raw, &c); err != nil {
-			return nil
+// ToolRecord is one tool call as shown in the timeline. Arguments and results
+// are redacted and shortened.
+type ToolRecord struct {
+	ID         string    `json:"id"`
+	RunID      string    `json:"run_id"`
+	Tool       string    `json:"tool"`
+	Status     string    `json:"status"`
+	Permission string    `json:"permission,omitempty"`
+	Started    time.Time `json:"started"`
+	Millis     int64     `json:"millis"`
+	Args       string    `json:"args"`
+	Result     string    `json:"result"`
+}
+
+// Summary condenses the first Covered messages for the model. The messages
+// themselves are kept.
+type Summary struct {
+	Text    string `json:"text"`
+	Covered int    `json:"covered"`
+}
+
+func sortNewestFirst(metas []ConvMeta) {
+	sort.Slice(metas, func(i, j int) bool {
+		if !metas[i].UpdatedAt.Equal(metas[j].UpdatedAt) {
+			return metas[i].UpdatedAt.After(metas[j].UpdatedAt)
 		}
-		metas = append(metas, c.ConvMeta)
-		return nil
+		return metas[i].ID > metas[j].ID
 	})
+}
+
+// List returns metadata for all conversations, newest first, from the index.
+func List() ([]ConvMeta, error) {
+	entries, err := index()
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(metas, func(i, j int) bool {
-		return metas[i].UpdatedAt.After(metas[j].UpdatedAt)
-	})
+	var metas []ConvMeta
+	for _, e := range entries {
+		metas = append(metas, e.ConvMeta)
+	}
+	sortNewestFirst(metas)
 	return metas, nil
 }
 
-// Search returns conversations whose title or message content contains query (case-insensitive).
+// Search returns conversations whose title, tags or message content contain
+// query, ignoring case. Conversations are decrypted only when the title and
+// tags do not already match.
 func Search(query string) ([]ConvMeta, error) {
 	if query == "" {
 		return List()
 	}
 	q := strings.ToLower(query)
-	var results []ConvMeta
-
-	err := store.Scan(bucket, func(_ string, raw []byte) error {
-		var c Conversation
-		if err := json.Unmarshal(raw, &c); err != nil {
-			return nil
-		}
-		if strings.Contains(strings.ToLower(c.Title), q) {
-			results = append(results, c.ConvMeta)
-			return nil
-		}
-		for _, m := range c.Messages {
-			if strings.Contains(strings.ToLower(m.Content), q) {
-				results = append(results, c.ConvMeta)
-				return nil
-			}
-		}
-		return nil
-	})
+	entries, err := index()
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].UpdatedAt.After(results[j].UpdatedAt)
-	})
-	return results, nil
-}
-
-// TotalUsage sums cumulative token usage across every conversation — the basis
-// for the shared account-wide usage budget.
-func TotalUsage() (promptTokens, completionTokens int64) {
-	_ = store.Scan(bucket, func(_ string, raw []byte) error {
-		var c Conversation
-		if err := json.Unmarshal(raw, &c); err != nil {
-			return nil
+	var results []ConvMeta
+	for key, e := range entries {
+		if strings.Contains(strings.ToLower(e.Title+"\x00"+strings.Join(e.Tags, "\x00")), q) {
+			results = append(results, e.ConvMeta)
+			continue
 		}
-		promptTokens += int64(c.TokenUsage.PromptTokens)
-		completionTokens += int64(c.TokenUsage.CompletionTokens)
-		return nil
-	})
-	return promptTokens, completionTokens
+		c, err := Load(key)
+		if err != nil {
+			continue
+		}
+		for _, m := range c.Messages {
+			if strings.Contains(strings.ToLower(m.Content), q) {
+				results = append(results, e.ConvMeta)
+				break
+			}
+		}
+	}
+	sortNewestFirst(results)
+	return results, nil
 }
 
 // Load retrieves a single conversation by ID.
@@ -120,12 +147,12 @@ func Load(id string) (*Conversation, error) {
 
 // Save persists a conversation to the encrypted store.
 func Save(c *Conversation) error {
-	return store.Put(bucket, c.ID, c)
+	return store.PutIndexed(bucket, indexBucket, c.ID, c, func(hash string) any { return entryFor(c, hash) })
 }
 
 // Delete removes a conversation by ID.
 func Delete(id string) error {
-	return store.Delete(bucket, id)
+	return store.DeleteIndexed(bucket, indexBucket, id)
 }
 
 // Export returns the conversation as Markdown, plain text, or JSON.

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -16,10 +17,12 @@ import (
 const maxDocBytes = 1 * 1024 * 1024 // 1 MB of extracted text
 
 // readDocumentTool extracts plain text from PDF and DOCX files.
-type readDocumentTool struct{ workDir string }
+type readDocumentTool struct{ ws workspace }
 
 // NewReadDocument builds the read_document tool, rooted at workDir for safety.
-func NewReadDocument(workDir string) domain.Tool { return &readDocumentTool{workDir} }
+func NewReadDocument(workDir string, protected ...string) domain.Tool {
+	return &readDocumentTool{workspace{dir: workDir, protected: protected}}
+}
 
 func (t *readDocumentTool) Name() string { return "read_document" }
 
@@ -31,19 +34,20 @@ func (t *readDocumentTool) Parameters() string {
 	return `{"path": "path to a .pdf or .docx file (relative to the work directory)"}`
 }
 
-func (t *readDocumentTool) Execute(args map[string]string) string {
-	abs, err := safePath(args["path"], t.workDir)
+func (t *readDocumentTool) Execute(ctx context.Context, args domain.Args) string {
+	f, size, err := t.ws.openRegular(args.String("path"))
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
+	defer func() { _ = f.Close() }()
 
-	lower := strings.ToLower(abs)
+	lower := strings.ToLower(args.String("path"))
 	var text string
 	switch {
 	case strings.HasSuffix(lower, ".pdf"):
-		text, err = extractPDF(abs)
+		text, err = extractPDF(ctx, f, size)
 	case strings.HasSuffix(lower, ".docx"):
-		text, err = extractDOCX(abs)
+		text, err = extractDOCX(f, size)
 	default:
 		return "ERROR: unsupported file type — only .pdf and .docx are supported"
 	}
@@ -62,16 +66,24 @@ func (t *readDocumentTool) Execute(args map[string]string) string {
 }
 
 // extractPDF returns the document text with "--- Page N ---" markers per page.
-func extractPDF(path string) (string, error) {
-	f, r, err := pdf.Open(path)
+func extractPDF(ctx context.Context, f io.ReaderAt, size int64) (text string, err error) {
+	// The PDF library panics on some malformed files.
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("malformed PDF: %v", p)
+		}
+	}()
+	r, err := pdf.NewReader(f, size)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = f.Close() }()
 
 	var sb strings.Builder
 	total := r.NumPage()
 	for i := 1; i <= total; i++ {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		page := r.Page(i)
 		if page.V.IsNull() {
 			continue
@@ -91,12 +103,11 @@ func extractPDF(path string) (string, error) {
 
 // extractDOCX unzips the .docx and pulls text from word/document.xml,
 // inserting a blank line between paragraphs.
-func extractDOCX(path string) (string, error) {
-	zr, err := zip.OpenReader(path)
+func extractDOCX(f io.ReaderAt, size int64) (string, error) {
+	zr, err := zip.NewReader(f, size)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = zr.Close() }()
 
 	var docXML io.ReadCloser
 	for _, file := range zr.File {

@@ -3,7 +3,7 @@
 A local-first desktop AI agent with tool use, voice input, MCP support, and persistent conversation history. Runs entirely on your machine — no cloud required.
 
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue)
-![Go](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go)
+![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -13,11 +13,16 @@ A local-first desktop AI agent with tool use, voice input, MCP support, and pers
 | | |
 |---|---|
 | **Local-first** | Works with [Ollama](https://ollama.com) by default; also supports any OpenAI-compatible endpoint (OpenAI, LM Studio, LocalAI, vLLM) |
-| **Tool use** | Read/write files, list directories, search content, run shell commands, get current time |
+| **Tool use** | Native function calling with a text fallback: files, PDF/DOCX, shell, web search, time |
 | **MCP support** | Connect to external services via [Model Context Protocol](https://modelcontextprotocol.io) stdio servers — PostgreSQL, MongoDB, Gmail, Google Drive, and more |
 | **Voice input** | Built-in mic recording → [whisper.cpp](https://github.com/ggerganov/whisper.cpp) transcription, bundled in the release binary |
-| **Permission system** | Per-tool allow / ask / deny; runtime approval dialog with 5-minute auto-deny |
-| **Encrypted storage** | Conversations and config stored in an AES-256-GCM encrypted local database (bbolt) |
+| **Permission system** | Per-tool allow / ask / deny; approvals once, per session or per workspace, revocable |
+| **Shell sandbox** | bubblewrap (Linux) or sandbox-exec (macOS); none on Windows — see [SECURITY.md](SECURITY.md) |
+| **Encrypted storage** | AES-256-GCM database; key in a file (portable) or the OS keychain; passphrase-encrypted backups |
+| **Agent profiles & workspaces** | Per-task instructions, tools and stricter permissions; ignore patterns per directory |
+| **File change review** | Diff before approval, conflict detection, undo, git status |
+| **Usage & limits** | Real token records, your own prices, per-run / daily / monthly limits |
+| **Tool timeline & diagnostics** | What ran, how it was approved, how long it took |
 | **Conversation history** | Full history with search, rename, and export (Markdown / plain text) |
 | **Per-conversation model** | Override the default LLM per conversation |
 | **Context management** | Live token counter; auto-trims oldest messages when approaching the limit |
@@ -123,10 +128,14 @@ Click **Test** to probe the server and list its tools. Once enabled, those tools
 | `read_file` | Read a file in the work directory (up to 2 MB) |
 | `write_file` | Write or overwrite a file |
 | `list_dir` | List directory contents |
-| `search_files` | Search file contents by pattern (up to 200 hits) |
+| `search_files` | Search file contents (up to 200 hits) |
 | `delete_file` | Delete a file |
-| `shell` | Run a shell command (5-minute timeout) |
+| `read_document` | Extract text from PDF and DOCX files |
+| `search_web` | DuckDuckGo, Brave or SerpAPI |
+| `shell` | Run a shell command, sandboxed where possible (5-minute timeout) |
 | `get_time` | Get the current date and time |
+
+File tools cannot leave the work directory, including through symlinks.
 
 ---
 
@@ -142,7 +151,15 @@ All settings are in **⚙ Settings**. Everything is saved in an encrypted local 
 | Model | _(auto)_ | Fetched live from the provider |
 | Work Dir | _(home)_ | Directory the agent can access |
 | Whisper Model | `base` | `tiny` / `base` / `small` / `medium` / `large` |
-| Context Limit | `8192` | Max tokens before history is trimmed |
+| Context Limit | `8192` | Size of the request window; older turns are left out of requests, never deleted |
+| Older turns | `sliding` | `sliding`, `hybrid` or `summary` |
+| Execution limits | 50 / 4 / 360 s | Model rounds, parallel tools and seconds per tool |
+| Automatic backups | `7` | How many to keep |
+| Per model | automatic | Context limit, tool calling and provider timeout (Settings) |
+| Prices and limits | none | 📊 Usage |
+| Tool calling | `auto` | Native function calling when the model supports it, or the text protocol |
+| Shell sandbox | `auto` | `auto`, `strict` (refuse without isolation) or `off` |
+| Sandbox network | off | Network access for sandboxed shell commands |
 | System Prompt | _(empty)_ | Global instruction prepended to every conversation |
 
 ### Data location
@@ -158,7 +175,7 @@ All settings are in **⚙ Settings**. Everything is saved in an encrypted local 
         └── ggml-base.bin
 ```
 
-> **Backup:** copy the entire `data/` directory including `agent.key`. Without the key the database cannot be decrypted.
+> **Backup:** use **Settings → Data Backup → Export** (encrypted with a passphrase). Without the key the database cannot be decrypted. See [docs/UPGRADING.md](docs/UPGRADING.md).
 
 ---
 
@@ -166,9 +183,9 @@ All settings are in **⚙ Settings**. Everything is saved in an encrypted local 
 
 ### Prerequisites
 
-- [Go 1.22+](https://go.dev/dl/)
+- [Go 1.26+](https://go.dev/dl/)
 - [Node.js 20+](https://nodejs.org)
-- [Wails CLI v2](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- [Wails CLI v2](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0`
 - [cmake](https://cmake.org) (for whisper.cpp)
 - **Linux only:** `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev ffmpeg cmake`
 - **macOS only:** `brew install cmake ffmpeg`
@@ -182,6 +199,15 @@ cd frontend && npm install && cd ..
 wails dev
 ```
 
+### Checks
+
+```bash
+go test -race ./... && go vet ./... && golangci-lint run ./...
+cd frontend && npm run lint && npm test && npm run build
+```
+
+`go build` and `go test` need no GTK headers; `wails build` does.
+
 ### Production build
 
 ```bash
@@ -193,19 +219,7 @@ wails build
 
 ## Architecture
 
-```
-├── app/            # Conversational agent loop (tool dispatch, retry, token counting)
-├── domain/         # Core interfaces: Message, Tool, LLMProvider
-├── llm/            # Ollama + OpenAI-compatible providers with retry
-├── tools/          # Built-in tools + MCP stdio client
-├── internal/
-│   ├── config/     # Encrypted config persistence
-│   ├── history/    # Conversation storage (bbolt, AES-256-GCM)
-│   ├── recorder/   # Microphone capture
-│   ├── store/      # Encrypted key-value store
-│   └── whisper/    # whisper.cpp subprocess wrapper
-└── frontend/       # React + TypeScript UI (Vite)
-```
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), which also covers adding tools, providers and MCP servers.
 
 ---
 
