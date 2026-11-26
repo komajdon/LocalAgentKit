@@ -61,6 +61,8 @@ export namespace config {
 	    budget_data_gb: number;
 	    budget_fund: number;
 	    fund_per_mtokens: number;
+	    sandbox_mode: string;
+	    sandbox_network: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -85,6 +87,8 @@ export namespace config {
 	        this.budget_data_gb = source["budget_data_gb"];
 	        this.budget_fund = source["budget_fund"];
 	        this.fund_per_mtokens = source["fund_per_mtokens"];
+	        this.sandbox_mode = source["sandbox_mode"];
+	        this.sandbox_network = source["sandbox_network"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -320,6 +324,29 @@ export namespace main {
 	        this.fund_total = source["fund_total"];
 	        this.fund_remain = source["fund_remain"];
 	        this.fund_unit = source["fund_unit"];
+	    }
+	}
+
+}
+
+export namespace sandbox {
+	
+	export class Status {
+	    backend: string;
+	    isolated: boolean;
+	    network_blocked: boolean;
+	    detail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.backend = source["backend"];
+	        this.isolated = source["isolated"];
+	        this.network_blocked = source["network_blocked"];
+	        this.detail = source["detail"];
 	    }
 	}
 

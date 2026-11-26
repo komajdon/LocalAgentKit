@@ -7,7 +7,7 @@ import {
   DeleteConversation, UpdateConversationPath, RenameConversation,
   SearchConversations, ExportConversation, SetConversationModel,
   TruncateAndResend, SetConversationPinned, SetConversationTags,
-  ListModels, ListTools, GetConfig, SaveConfig, PickDirectory,
+  ListModels, ListTools, GetConfig, GetSandboxStatus, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, ProbeMCPServer,
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup,
@@ -57,6 +57,8 @@ interface Cfg {
   mcp_servers: MCPServer[]
   notifications: boolean
   search_provider: string
+  sandbox_mode: string
+  sandbox_network: boolean
   search_api_key: string
   theme: string
   budget_data_gb: number
@@ -191,8 +193,15 @@ export default function App() {
     mcp_servers: [], notifications: true,
     search_provider: 'duckduckgo', search_api_key: '',
     theme: 'dark',
+    sandbox_mode: 'auto', sandbox_network: false,
     budget_data_gb: 50, budget_fund: 50, fund_per_mtokens: 1,
   })
+
+  // Isolation actually applied to shell commands under the saved settings.
+  const [sandboxStatus, setSandboxStatus] = useState<{ backend: string; isolated: boolean; network_blocked: boolean; detail: string } | null>(null)
+  useEffect(() => {
+    if (showCfg) GetSandboxStatus().then(setSandboxStatus).catch(() => setSandboxStatus(null))
+  }, [showCfg])
 
   // MCP UI state
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
@@ -1463,6 +1472,27 @@ export default function App() {
                     <span>Desktop notifications</span>
                   </label>
                   <div className="field-hint">Alert me when a long task finishes, a permission is needed, or an error occurs — only while the window is in the background.</div>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="sandbox-mode">Shell sandbox</label>
+                  <select id="sandbox-mode" value={cfg.sandbox_mode || 'auto'}
+                    onChange={e => setCfg(c => ({ ...c, sandbox_mode: e.target.value }))}>
+                    <option value="auto">Automatic — isolate when the system supports it</option>
+                    <option value="strict">Strict — refuse to run without isolation</option>
+                    <option value="off">Off — commands can reach the whole computer</option>
+                  </select>
+                  <label className="mcp-toggle">
+                    <input type="checkbox" checked={!!cfg.sandbox_network}
+                      onChange={e => setCfg(c => ({ ...c, sandbox_network: e.target.checked }))} />
+                    <span>Allow network access inside the sandbox</span>
+                  </label>
+                  <div className="field-hint" role="status">
+                    {sandboxStatus === null ? 'Checking isolation…'
+                      : sandboxStatus.isolated
+                        ? `Saved settings: isolated with ${sandboxStatus.backend}, network ${sandboxStatus.network_blocked ? 'blocked' : 'allowed'}.`
+                        : `Saved settings: NOT isolated (${sandboxStatus.detail}).`}
+                  </div>
                 </div>
 
                 <div className="field">

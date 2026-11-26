@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"agent-gui/domain"
+	"agent-gui/internal/sandbox"
 )
 
 // layout builds work/, outside/secret.txt and work/appdata/key.
@@ -73,8 +74,8 @@ func TestSymlinkEscapesAreRefused(t *testing.T) {
 	refused(t, "write via dangling link", run(write, "path", "dangling", "content", "x"))
 	refused(t, "list via dir link", run(NewListDir(work), "path", "dirlink"))
 	refused(t, "delete via dir link", run(NewDeleteFile(work), "path", "dirlink/secret.txt"))
-	refused(t, "shell dir link", run(NewShell(work), "command", "cat secret.txt", "dir", "dirlink"))
-	refused(t, "shell dir outside", run(NewShell(work), "command", "cat secret.txt", "dir", outside))
+	refused(t, "shell dir link", run(NewShell(work, sandbox.Options{}), "command", "cat secret.txt", "dir", "dirlink"))
+	refused(t, "shell dir outside", run(NewShell(work, sandbox.Options{}), "command", "cat secret.txt", "dir", outside))
 	refused(t, "document via link", run(NewReadDocument(work), "path", "dirlink/x.pdf"))
 
 	if out := run(NewSearchFiles(work, appData), "pattern", "secret"); out != "No matches found." {

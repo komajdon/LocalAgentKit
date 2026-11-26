@@ -68,6 +68,10 @@ type Config struct {
 	BudgetDataGB   float64 `json:"budget_data_gb"`   // total data allowance (GB)
 	BudgetFund     float64 `json:"budget_fund"`      // total fund allowance (STRRIAL)
 	FundPerMTokens float64 `json:"fund_per_mtokens"` // STRRIAL charged per 1M tokens
+	// Shell isolation: auto (default) | strict | off.
+	SandboxMode string `json:"sandbox_mode"`
+	// SandboxNetwork lets isolated shell commands use the network.
+	SandboxNetwork bool `json:"sandbox_network"`
 }
 
 func Default() Config {
@@ -85,6 +89,7 @@ func Default() Config {
 		BudgetDataGB:    50,
 		BudgetFund:      50,
 		FundPerMTokens:  1,
+		SandboxMode:     "auto",
 	}
 }
 
@@ -116,6 +121,9 @@ func Load() Config {
 	}
 	if cfg.FundPerMTokens == 0 {
 		cfg.FundPerMTokens = 1
+	}
+	if cfg.SandboxMode == "" {
+		cfg.SandboxMode = "auto"
 	}
 	return cfg
 }

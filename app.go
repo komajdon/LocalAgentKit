@@ -23,6 +23,7 @@ import (
 	"agent-gui/internal/config"
 	"agent-gui/internal/history"
 	"agent-gui/internal/recorder"
+	"agent-gui/internal/sandbox"
 	"agent-gui/internal/store"
 	"agent-gui/internal/whisper"
 	"agent-gui/llm"
@@ -384,10 +385,13 @@ func (a *App) newProvider() domain.LLMProvider {
 func (a *App) buildAgent(workDir string) *appLayer.ConversationalAgent {
 	provider := a.newProvider()
 
-	registry := tools.DefaultRegistryFull(workDir, a.cfg.MCPServers, tools.SearchConfig{
-		Provider: a.cfg.SearchProvider,
-		APIKey:   a.cfg.SearchAPIKey,
-	}, store.DataDir())
+	registry := tools.NewRegistry(tools.Options{
+		WorkDir:    workDir,
+		MCPServers: a.cfg.MCPServers,
+		Search:     tools.SearchConfig{Provider: a.cfg.SearchProvider, APIKey: a.cfg.SearchAPIKey},
+		Sandbox:    a.sandboxOptions(),
+		Protected:  []string{store.DataDir()},
+	})
 	agent := appLayer.NewConversationalAgent(a.cfg.Model, provider, registry, a.cfg.SystemPrompt, a.cfg.ContextLimit)
 
 	agent.OnChunk = func(chunk string) {
@@ -445,6 +449,15 @@ func (a *App) buildAgent(workDir string) *appLayer.ConversationalAgent {
 	}
 
 	return agent
+}
+
+func (a *App) sandboxOptions() sandbox.Options {
+	return sandbox.Options{Mode: sandbox.Mode(a.cfg.SandboxMode), AllowNetwork: a.cfg.SandboxNetwork}
+}
+
+// GetSandboxStatus reports the isolation shell commands currently get.
+func (a *App) GetSandboxStatus() sandbox.Status {
+	return sandbox.Probe(a.sandboxOptions())
 }
 
 // ── Conversations ─────────────────────────────────────────────────────────────

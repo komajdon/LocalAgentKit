@@ -3,18 +3,29 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"time"
 
 	"agent-gui/domain"
+	"agent-gui/internal/sandbox"
 )
 
-const shellTimeout = 5 * time.Minute
+const (
+	shellTimeout   = 5 * time.Minute
+	maxCommandLen  = 10_000
+	maxShellOutput = 256 * 1024
+)
 
-type shellTool struct{ ws workspace }
+type shellTool struct {
+	ws   workspace
+	opts sandbox.Options
+}
 
-func NewShell(workDir string, protected ...string) domain.Tool {
-	return &shellTool{workspace{workDir, protected}}
+// NewShell builds the shell tool. opts.WorkDir and opts.Hidden are taken from
+// workDir and protected; an unset mode means strict.
+func NewShell(workDir string, opts sandbox.Options, protected ...string) domain.Tool {
+	opts.WorkDir = workDir
+	opts.Hidden = protected
+	return &shellTool{workspace{workDir, protected}, opts}
 }
 
 func (t *shellTool) Name() string        { return "shell" }
@@ -22,8 +33,6 @@ func (t *shellTool) Description() string { return "Run a shell command and retur
 func (t *shellTool) Parameters() string {
 	return `{"command": "bash command to run", "dir": "working directory (optional, defaults to conversation work dir)"}`
 }
-
-const maxCommandLen = 10_000
 
 func (t *shellTool) Execute(args map[string]string) string {
 	command := args["command"]
@@ -35,7 +44,8 @@ func (t *shellTool) Execute(args map[string]string) string {
 	if dir == "" {
 		dir = t.ws.dir
 	}
-	// This only constrains where the command starts, not what it can reach.
+	// This only constrains where the command starts; reach is limited by the
+	// sandbox, when one is active.
 	dir, err := t.ws.directory(dir)
 	if err != nil {
 		return "ERROR: " + err.Error()
@@ -44,14 +54,20 @@ func (t *shellTool) Execute(args map[string]string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), shellTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	cmd, status, err := sandbox.Command(ctx, t.opts, dir, command)
+	if err != nil {
+		return "ERROR: " + err.Error()
+	}
+	out := &sandbox.Output{Max: maxShellOutput}
+	cmd.Stdout, cmd.Stderr = out, out
+	err = cmd.Run()
+
+	header := "[" + status.String() + "]\n"
 	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Sprintf("ERROR: command timed out after %s", shellTimeout)
+		return header + fmt.Sprintf("ERROR: command timed out after %s\n%s", shellTimeout, out)
 	}
 	if err != nil {
-		return fmt.Sprintf("EXIT ERROR: %v\n%s", err, string(out))
+		return header + fmt.Sprintf("EXIT ERROR: %v\n%s", err, out)
 	}
-	return string(out)
+	return header + out.String()
 }
