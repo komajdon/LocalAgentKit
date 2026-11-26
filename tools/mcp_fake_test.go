@@ -30,7 +30,8 @@ func fakeMCP(name, logPath string) config.MCPServerConfig {
 }
 
 // fakeMCPServer logs "start" and each notification, and offers the tools echo,
-// hang (never answers) and die (exits).
+// hang (never answers), die (exits), grow (adds a tool and says so) and freeze
+// (stops answering anything).
 func fakeMCPServer() {
 	logf := func(s string) {
 		if f, err := os.OpenFile(os.Getenv("LAK_MCP_LOG"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
@@ -39,6 +40,7 @@ func fakeMCPServer() {
 		}
 	}
 	logf("start")
+	grown, frozen := false, false
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
 		var req struct {
@@ -56,6 +58,9 @@ func fakeMCPServer() {
 			logf(req.Method)
 			continue
 		}
+		if frozen {
+			continue
+		}
 		var result any = map[string]any{}
 		switch req.Method {
 		case "tools/list":
@@ -65,12 +70,21 @@ func fakeMCPServer() {
 				{"name": "hang", "inputSchema": schema},
 				{"name": "die", "inputSchema": schema},
 			}}
+			if grown {
+				list := result.(map[string]any)["tools"].([]map[string]any)
+				result = map[string]any{"tools": append(list, map[string]any{"name": "extra", "inputSchema": schema})}
+			}
 		case "tools/call":
 			switch req.Params.Name {
 			case "hang":
 				continue
 			case "die":
 				os.Exit(1)
+			case "grow":
+				grown = true
+				fmt.Println(`{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}`)
+			case "freeze":
+				frozen = true
 			}
 			args, _ := json.Marshal(req.Params.Arguments)
 			result = map[string]any{"content": []map[string]any{{"type": "text", "text": string(args)}}}

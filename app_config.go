@@ -100,6 +100,7 @@ func (a *App) SaveMCPServers(servers []config.MCPServerConfig) string {
 
 // GetMCPStatus reports the state of each configured server.
 func (a *App) GetMCPStatus() []tools.MCPStatus {
+	a.mcp.Check(a.ctx)
 	return a.mcp.Status(a.config().MCPServers)
 }
 

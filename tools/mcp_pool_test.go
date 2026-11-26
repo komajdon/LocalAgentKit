@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"agent-gui/domain"
 	"agent-gui/internal/config"
@@ -140,5 +141,38 @@ func TestPoolReportsBrokenServerAndClose(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "log")
 	if got := p.Tools(context.Background(), []config.MCPServerConfig{fakeMCP("a", log)}); len(got) != 0 || starts(t, log) != 0 {
 		t.Fatal("closed pool started a server")
+	}
+}
+
+func TestPoolRefreshesToolsAndDetectsFrozenServers(t *testing.T) {
+	interval, timeout := healthInterval, healthTimeout
+	healthInterval, healthTimeout = 0, 300*time.Millisecond
+	defer func() { healthInterval, healthTimeout = interval, timeout }()
+
+	log := filepath.Join(t.TempDir(), "log")
+	p := newPool(t)
+	servers := []config.MCPServerConfig{fakeMCP("a", log)}
+	e, err := p.entry(servers[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := e.connect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CallTool(context.Background(), "grow", nil); err != nil {
+		t.Fatal(err)
+	}
+	p.Check(context.Background())
+	if got := p.Status(servers)[0]; got.State != MCPConnected || len(got.Tools) != 4 {
+		t.Fatalf("after list_changed: %+v", got)
+	}
+
+	if _, err := client.CallTool(context.Background(), "freeze", nil); err != nil {
+		t.Fatal(err)
+	}
+	p.Check(context.Background())
+	if got := p.Status(servers)[0]; got.State != MCPFailed || !strings.Contains(got.LastError, "stopped responding") {
+		t.Fatalf("frozen server: %+v", got)
 	}
 }

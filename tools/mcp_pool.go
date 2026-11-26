@@ -60,7 +60,8 @@ type mcpEntry struct {
 	defs    []mcpToolDef
 	lastErr string
 	starts  []time.Time
-	retired bool // removed from the configuration or pool shut down
+	checked time.Time // last health check
+	retired bool      // removed from the configuration or pool shut down
 }
 
 func configKey(c config.MCPServerConfig) string {
@@ -173,6 +174,72 @@ func (e *mcpEntry) retire() {
 	}
 }
 
+// refresh rediscovers the tools if the server announced a change.
+func (e *mcpEntry) refresh(ctx context.Context, client *mcpClient) {
+	if !client.stale.Swap(false) {
+		return
+	}
+	defs, err := client.ListTools(ctx)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err != nil {
+		client.stale.Store(true) // try again next time
+		e.lastErr = redact.String(err.Error())
+		return
+	}
+	e.defs, e.lastErr = defs, ""
+}
+
+// healthInterval is how often a running server is pinged; tests shorten it.
+var (
+	healthInterval = 30 * time.Second
+	healthTimeout  = 5 * time.Second
+)
+
+// Check pings connected servers that have not been checked recently and stops
+// those that do not answer; they restart when next used. Any reply, even
+// "method not found", counts as alive.
+func (p *MCPPool) Check(ctx context.Context) {
+	p.mu.Lock()
+	var entries []*mcpEntry
+	for _, e := range p.entries {
+		entries = append(entries, e)
+	}
+	p.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, e := range entries {
+		client := e.alive()
+		e.mu.Lock()
+		due := client != nil && time.Since(e.checked) >= healthInterval
+		if due {
+			e.checked = time.Now()
+		}
+		e.mu.Unlock()
+		if !due {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(ctx, healthTimeout)
+			defer cancel()
+			_, err := client.callMethod(ctx, "ping", nil)
+			var reply *rpcError
+			if err == nil || errors.As(err, &reply) {
+				e.refresh(ctx, client)
+				return
+			}
+			e.mu.Lock()
+			if e.client == client {
+				e.client, e.lastErr = nil, "the server stopped responding"
+			}
+			e.mu.Unlock()
+			client.close()
+		}()
+	}
+	wg.Wait()
+}
+
 // Tools returns the tools of every enabled server, starting those not yet
 // running in parallel. A server that fails is left out; see Status.
 func (p *MCPPool) Tools(ctx context.Context, servers []config.MCPServerConfig) []domain.Tool {
@@ -189,9 +256,11 @@ func (p *MCPPool) Tools(ctx context.Context, servers []config.MCPServerConfig) [
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := e.connect(ctx); err != nil {
+			client, err := e.connect(ctx)
+			if err != nil {
 				return
 			}
+			e.refresh(ctx, client)
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			for _, def := range e.defs {

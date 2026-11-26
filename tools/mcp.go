@@ -31,6 +31,7 @@ type mcpClient struct {
 	pending map[int64]chan jsonRPCResponse
 	nextID  atomic.Int64
 	done    chan struct{} // closed when readLoop exits
+	stale   atomic.Bool   // the server says its tool list changed
 
 	// writeMu serialises writes to stdin so concurrent tool calls (parallel
 	// tool execution) cannot interleave bytes of different JSON-RPC frames.
@@ -47,6 +48,7 @@ type jsonRPCRequest struct {
 type jsonRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int64           `json:"id"`
+	Method  string          `json:"method,omitempty"` // set on server messages
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *struct {
 		Code    int    `json:"code"`
@@ -153,6 +155,13 @@ func (c *mcpClient) readLoop() {
 			fmt.Fprintf(os.Stderr, "MCP: invalid JSON from server: %v\n", err)
 			continue
 		}
+		if resp.Method != "" {
+			// A notification or request from the server, not a reply.
+			if resp.Method == "notifications/tools/list_changed" {
+				c.stale.Store(true)
+			}
+			continue
+		}
 		c.mu.Lock()
 		ch, ok := c.pending[resp.ID]
 		if ok {
@@ -164,6 +173,14 @@ func (c *mcpClient) readLoop() {
 		}
 	}
 }
+
+// rpcError is an error reply from the server, as opposed to no reply.
+type rpcError struct {
+	code    int
+	message string
+}
+
+func (e *rpcError) Error() string { return fmt.Sprintf("MCP error %d: %s", e.code, e.message) }
 
 // callMethod sends a request and waits for its reply, the call timeout or ctx.
 func (c *mcpClient) callMethod(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -206,7 +223,7 @@ func (c *mcpClient) callMethod(ctx context.Context, method string, params any) (
 	select {
 	case resp := <-ch:
 		if resp.Error != nil {
-			return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
+			return nil, &rpcError{resp.Error.Code, resp.Error.Message}
 		}
 		return resp.Result, nil
 	case <-ctx.Done():
