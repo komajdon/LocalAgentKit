@@ -116,6 +116,10 @@ func (a *App) agentFor(cfg configSnapshot, profile ModelProfile, conv *history.C
 	for _, m := range conv.Messages {
 		agent.Inject(m.Message())
 	}
+	agent.Strategy = appLayer.Strategy(cfg.ContextStrategy)
+	if s := conv.Summary; s != nil {
+		agent.Summary = &appLayer.Summary{Text: s.Text, Covered: s.Covered}
+	}
 	if profile.ToolCalling == "text" {
 		agent.UseTextTools()
 	}
@@ -241,12 +245,13 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 		return a.authorize(r.ctx, r.convID, prior.WorkDir, req)
 	}
 
-	m := a.newMeter(string(cfg.Provider), profile.Model, r.convID, func(text string) {
-		a.emitRun(r, "chat:usage_warning", text, func() {
-			r.turn = append(r.turn, displayItem{Type: "status", Data: map[string]any{"text": "Usage warning: " + text}})
+	warn := func(text string) {
+		a.emitRun(r, "chat:warning", text, func() {
+			r.turn = append(r.turn, displayItem{Type: "status", Data: map[string]any{"text": "Warning: " + text}})
 		})
-	})
-	agent.BeforeRequest, agent.OnRequest = m.before, m.record
+	}
+	m := a.newMeter(string(cfg.Provider), profile.Model, r.convID, warn)
+	agent.BeforeRequest, agent.OnRequest, agent.OnWarning = m.before, m.record, warn
 
 	a.emitRun(r, "chat:thinking", nil, nil)
 	err := agent.Chat(r.ctx, text)
@@ -297,6 +302,10 @@ func (a *App) finishRun(r *run, agent *appLayer.ConversationalAgent, runErr erro
 		}
 		prompt, completion := agent.Usage()
 		conv.TokenUsage = history.TokenUsage{PromptTokens: prompt, CompletionTokens: completion}
+		conv.Summary = nil
+		if s := agent.Summary; s != nil {
+			conv.Summary = &history.Summary{Text: s.Text, Covered: s.Covered}
+		}
 		conv.UpdatedAt = time.Now()
 		if err := history.Save(conv); err != nil {
 			a.logf("could not save conversation: %v", err)
@@ -341,6 +350,9 @@ func (a *App) TruncateAndResend(conversationID string, userOrdinal int, newText 
 			return errors.New("message to edit was not found")
 		}
 		conv.Messages = conv.Messages[:cut]
+		if conv.Summary != nil && conv.Summary.Covered > cut {
+			conv.Summary = nil // it describes messages being replaced
+		}
 		conv.DisplayItems = truncateDisplayItems(conv.DisplayItems, userOrdinal)
 		return nil
 	})

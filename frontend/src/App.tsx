@@ -47,7 +47,7 @@ type Item =
   | { type: 'status'; id: number; text: string }
 
 interface ChatEvent { conversation_id: string; run_id: string; seq: number; data: any }
-const CHAT_EVENTS = ['started', 'thinking', 'chunk', 'assistant', 'tool_call', 'tool_result', 'context_usage', 'usage_warning', 'done', 'stopped', 'error']
+const CHAT_EVENTS = ['started', 'thinking', 'chunk', 'assistant', 'tool_call', 'tool_result', 'context_usage', 'warning', 'done', 'stopped', 'error']
 const FINAL_EVENTS = ['done', 'stopped', 'error']
 const CONV_PAGE = 100
 
@@ -81,12 +81,13 @@ interface Cfg {
   sandbox_mode: string
   tool_calling: string
   backup_retention: number
+  context_strategy: string
   sandbox_network: boolean
   search_api_key: string
   theme: string
 }
 
-interface ContextUsage { used: number; limit: number; total?: number; estimated?: boolean }
+interface ContextUsage { used: number; limit: number; total?: number; estimated?: boolean; omitted?: number; summarised?: number }
 interface UpdateInfo { available: boolean; current: string; latest: string; url: string }
 
 let seq = 0
@@ -227,7 +228,7 @@ export default function App() {
     mcp_servers: [], notifications: true,
     search_provider: 'duckduckgo', search_api_key: '',
     theme: 'dark',
-    sandbox_mode: 'auto', sandbox_network: false, tool_calling: 'auto', backup_retention: 7,
+    sandbox_mode: 'auto', sandbox_network: false, tool_calling: 'auto', backup_retention: 7, context_strategy: 'sliding',
   })
 
   // Isolation actually applied to shell commands under the saved settings.
@@ -473,8 +474,8 @@ export default function App() {
       setPermReq(cur => (cur?.id === id ? null : cur))
     }))
 
-    handlers['usage_warning'] = (text: string) =>
-      setItems(prev => [...prev, { type: 'status', id: uid(), text: `Usage warning: ${text}` }])
+    handlers['warning'] = (text: string) =>
+      setItems(prev => [...prev, { type: 'status', id: uid(), text: `Warning: ${text}` }])
 
     handlers['context_usage'] = (u: ContextUsage) => setCtxUsage(u)
 
@@ -1023,6 +1024,8 @@ export default function App() {
                 const totalStr = ctxUsage.total ? ` · ${ctxUsage.total.toLocaleString()} tokens used this conversation` : ''
                 const title = `Context: ${prefix}${ctxUsage.used.toLocaleString()} / ${ctxUsage.limit.toLocaleString()} tokens`
                   + (ctxUsage.estimated ? ' (estimated)' : ' (actual)') + totalStr
+                  + (ctxUsage.omitted ? `\n${ctxUsage.omitted} older messages are not sent`
+                    + (ctxUsage.summarised ? `; ${ctxUsage.summarised} are summarised` : '') + ' (history is kept)' : '')
                 return (
                   <div className={`ctx-bar ${warn ? 'warn' : ''}`} title={title}>
                     <div className="ctx-fill" style={{ width: pct + '%' }} />
@@ -1618,7 +1621,18 @@ export default function App() {
                     value={cfg.context_limit || 8192}
                     onChange={e => setCfg(c => ({ ...c, context_limit: Number(e.target.value) }))}
                   />
-                  <div className="field-hint">Approximate token limit before old messages are trimmed (default: 8192)</div>
+                  <div className="field-hint">Approximate size of what is sent to the model (default: 8192). History is never deleted.</div>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="context-strategy">Older turns</label>
+                  <select id="context-strategy" value={cfg.context_strategy || 'sliding'}
+                    onChange={e => setCfg(c => ({ ...c, context_strategy: e.target.value }))}>
+                    <option value="sliding">Sliding window — leave them out</option>
+                    <option value="hybrid">Hybrid — keep what fits, summarise the rest</option>
+                    <option value="summary">Summary — keep two turns, summarise the rest</option>
+                  </select>
+                  <div className="field-hint">Summaries are written by the model, cost extra requests and can be wrong.</div>
                 </div>
 
                 <div className="field">

@@ -39,6 +39,10 @@ type ContextUsage struct {
 	Limit     int  `json:"limit"`
 	Total     int  `json:"total"`     // cumulative prompt+completion tokens this conversation
 	Estimated bool `json:"estimated"` // true when Used is a character heuristic, not real usage
+	// Omitted messages are left out of requests; Summarised of them are
+	// represented by a summary.
+	Omitted    int `json:"omitted"`
+	Summarised int `json:"summarised"`
 }
 
 // ConversationalAgent drives one conversation: it maintains history,
@@ -75,6 +79,13 @@ type ConversationalAgent struct {
 	OnRequest func(RequestUsage)
 	// MaxRounds limits model requests per run; 0 means the default.
 	MaxRounds int
+	// OnWarning reports a non-fatal problem to the user.
+	OnWarning func(string)
+	// Strategy and Summary control how old turns are condensed.
+	Strategy Strategy
+	Summary  *Summary
+
+	charsPerToken float64
 }
 
 func NewConversationalAgent(
@@ -137,7 +148,7 @@ func (a *ConversationalAgent) Messages() []domain.Message { return a.conv.Histor
 
 // TokenCount estimates the tokens the next request would use: the system
 // prompt, counted once, plus the messages that fit the context window.
-func (a *ConversationalAgent) TokenCount() int { return estimateTokens(a.window()) }
+func (a *ConversationalAgent) TokenCount() int { return a.tokens(a.window()) }
 
 // recordUsage folds one provider usage report into the running totals.
 func (a *ConversationalAgent) recordUsage(u *domain.Usage) {
@@ -174,6 +185,11 @@ func (a *ConversationalAgent) CurrentUsage() ContextUsage {
 		limit = 8192
 	}
 	usage := ContextUsage{Limit: limit, Total: a.totalPromptTokens + a.totalCompletionTokens}
+	summary, first := a.plan()
+	usage.Omitted = first
+	if summary != nil {
+		usage.Summarised = summary.Covered
+	}
 	if a.hasRealUsage {
 		// Real current context ≈ the last prompt plus the completion it produced.
 		usage.Used = a.lastPromptTokens + a.lastCompletionTokens
@@ -182,6 +198,15 @@ func (a *ConversationalAgent) CurrentUsage() ContextUsage {
 		usage.Estimated = true
 	}
 	return usage
+}
+
+// recordTotals adds a side request, such as a summary, to the conversation's
+// totals without treating it as the current context size.
+func (a *ConversationalAgent) recordTotals(u *domain.Usage) {
+	if u != nil {
+		a.totalPromptTokens += u.PromptTokens
+		a.totalCompletionTokens += u.CompletionTokens
+	}
 }
 
 func (a *ConversationalAgent) addAssistant(content string, calls ...domain.ToolCall) {

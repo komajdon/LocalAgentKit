@@ -71,6 +71,8 @@ type Config struct {
 	ToolCalling string `json:"tool_calling"`
 	// BackupRetention is how many automatic backups are kept.
 	BackupRetention int `json:"backup_retention"`
+	// ContextStrategy: sliding (default) | summary | hybrid.
+	ContextStrategy string `json:"context_strategy"`
 }
 
 func Default() Config {
@@ -88,6 +90,7 @@ func Default() Config {
 		SandboxMode:     "auto",
 		ToolCalling:     "auto",
 		BackupRetention: DefaultBackupRetention,
+		ContextStrategy: "sliding",
 	}
 }
 

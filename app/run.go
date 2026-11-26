@@ -58,8 +58,15 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			}
 		}
 
-		input := estimateTokens(a.window())
+		if err := a.summarize(ctx); err != nil {
+			return err
+		}
+		sent := a.window()
+		input := a.tokens(sent)
 		reply, usage, err := a.request(ctx)
+		if usage != nil {
+			a.calibrate(sent, usage.PromptTokens)
+		}
 		// A request that produced something was consumed even if it failed.
 		if err == nil || reply.Content != "" {
 			a.reportRequest(input, reply, usage)
@@ -190,7 +197,7 @@ func (a *ConversationalAgent) reportRequest(estimatedInput int, reply domain.Rep
 		a.OnRequest(RequestUsage{Input: u.PromptTokens, Output: u.CompletionTokens, Cached: u.CachedTokens})
 		return
 	}
-	a.OnRequest(RequestUsage{Input: estimatedInput, Output: len(reply.Content) / 4, Estimated: true})
+	a.OnRequest(RequestUsage{Input: estimatedInput, Output: a.tokens([]domain.Message{{Content: reply.Content}}), Estimated: true})
 }
 
 // collectCalls validates each call and asks permission. Prompts happen here,

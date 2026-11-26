@@ -54,6 +54,14 @@ type Conversation struct {
 	Messages     []SavedMessage  `json:"messages"`
 	DisplayItems json.RawMessage `json:"display_items,omitempty"`
 	TokenUsage   TokenUsage      `json:"token_usage,omitempty"`
+	Summary      *Summary        `json:"summary,omitempty"`
+}
+
+// Summary condenses the first Covered messages for the model. The messages
+// themselves are kept.
+type Summary struct {
+	Text    string `json:"text"`
+	Covered int    `json:"covered"`
 }
 
 func sortNewestFirst(metas []ConvMeta) {

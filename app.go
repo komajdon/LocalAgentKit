@@ -197,6 +197,9 @@ func (a *App) BranchConversation(id string, displayItemIndex int) (*history.Conv
 		TokenUsage: src.TokenUsage,
 	}
 	copy(branch.Messages, src.Messages[:cutMsgIdx])
+	if src.Summary != nil && src.Summary.Covered <= cutMsgIdx {
+		branch.Summary = src.Summary
+	}
 
 	// Truncate display items to match the copied history. When re-sending a user
 	// message, omit that original item so the new branch has one canonical turn.

@@ -5,6 +5,8 @@ export namespace app {
 	    limit: number;
 	    total: number;
 	    estimated: boolean;
+	    omitted: number;
+	    summarised: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ContextUsage(source);
@@ -16,6 +18,8 @@ export namespace app {
 	        this.limit = source["limit"];
 	        this.total = source["total"];
 	        this.estimated = source["estimated"];
+	        this.omitted = source["omitted"];
+	        this.summarised = source["summarised"];
 	    }
 	}
 
@@ -62,6 +66,7 @@ export namespace config {
 	    sandbox_network: boolean;
 	    tool_calling: string;
 	    backup_retention: number;
+	    context_strategy: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -87,6 +92,7 @@ export namespace config {
 	        this.sandbox_network = source["sandbox_network"];
 	        this.tool_calling = source["tool_calling"];
 	        this.backup_retention = source["backup_retention"];
+	        this.context_strategy = source["context_strategy"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -203,6 +209,20 @@ export namespace history {
 		    return a;
 		}
 	}
+	export class Summary {
+	    text: string;
+	    covered: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Summary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.covered = source["covered"];
+	    }
+	}
 	export class TokenUsage {
 	    prompt_tokens: number;
 	    completion_tokens: number;
@@ -269,6 +289,7 @@ export namespace history {
 	    messages: SavedMessage[];
 	    display_items?: number[];
 	    token_usage?: TokenUsage;
+	    summary?: Summary;
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -287,6 +308,7 @@ export namespace history {
 	        this.messages = this.convertValues(source["messages"], SavedMessage);
 	        this.display_items = source["display_items"];
 	        this.token_usage = this.convertValues(source["token_usage"], TokenUsage);
+	        this.summary = this.convertValues(source["summary"], Summary);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -307,6 +329,7 @@ export namespace history {
 		    return a;
 		}
 	}
+	
 	
 
 }
@@ -357,6 +380,7 @@ export namespace main {
 	    messages: history.SavedMessage[];
 	    display_items?: number[];
 	    token_usage?: history.TokenUsage;
+	    summary?: history.Summary;
 	    running: boolean;
 	    seq: number;
 	
@@ -377,6 +401,7 @@ export namespace main {
 	        this.messages = this.convertValues(source["messages"], history.SavedMessage);
 	        this.display_items = source["display_items"];
 	        this.token_usage = this.convertValues(source["token_usage"], history.TokenUsage);
+	        this.summary = this.convertValues(source["summary"], history.Summary);
 	        this.running = source["running"];
 	        this.seq = source["seq"];
 	    }
