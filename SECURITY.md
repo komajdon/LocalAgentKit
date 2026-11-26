@@ -84,6 +84,8 @@ shell sandbox below.
 - `/etc` is readable inside the Linux sandbox.
 - On macOS and Linux, commands get a private `HOME` unless the work directory
   contains your real one.
+- On macOS, `mktemp` is wrapped to use the private temporary directory. Programs
+  that ask the system for the shared one by other means are refused.
 - **The current macOS profile has not been run on a Mac.**
 - Container-based execution is not implemented.
 

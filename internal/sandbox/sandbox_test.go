@@ -123,7 +123,8 @@ func TestHomeAndTempAreUsable(t *testing.T) {
 	if s := Probe(o); !s.Isolated {
 		t.Skip("no isolation backend:", s.Detail)
 	}
-	out, err := output(t, o, `echo x > "$HOME/h" && f=$(mktemp) && echo y > "$f" && cat "$HOME/h" "$f"`)
+	out, err := output(t, o, `echo x > "$HOME/h" && f=$(mktemp) && echo y > "$f" && cat "$HOME/h" "$f" &&
+		d=$(mktemp -d) && touch "$d/in" && g=$(mktemp -t pre.XXXXXX) && test -f "$g" && sh -c 'test -f "$(mktemp)"'`)
 	if err != nil || !strings.Contains(out, "x") || !strings.Contains(out, "y") {
 		t.Fatalf("out=%q err=%v", out, err)
 	}

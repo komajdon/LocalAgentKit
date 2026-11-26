@@ -32,6 +32,9 @@ func TestUnifiedAppliesWithGit(t *testing.T) {
 			patch := Unified("f", tc.old, tc.new)
 			cmd := exec.Command("git", "apply", "-p1", "-")
 			cmd.Dir, cmd.Stdin = dir, strings.NewReader(patch)
+			// The machine's git settings, such as Windows line-ending
+			// conversion, must not change what is being tested.
+			cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%s\n%s", out, patch)
 			}
