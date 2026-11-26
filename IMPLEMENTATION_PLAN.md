@@ -2,6 +2,13 @@
 
 Branch: `dev/hardening` (from `main` @ `abbc7c1`). Nothing is pushed or merged.
 
+## Git restrictions (highest priority, set by the owner 2026-11-26)
+
+Local commits only. No push, force-push, merge, PR, tag push, release, deploy,
+remote CI, remote changes, or rewriting of existing commits until the owner
+authorizes it separately. Do not ask for push permission. Record anything that
+needs remote infrastructure as `UNVERIFIED` and continue.
+
 ## Baseline (2026-11-26, before any change)
 
 Environment: Linux amd64, Go 1.26.6, Node 20.20.2, npm 10.8.2, golangci-lint 2.13.1.
@@ -76,8 +83,7 @@ Status: `todo`, `done`, `partial`, `blocked`. Priority P0 = security/data integr
 
 ## Next action
 
-1. Push (needs the owner's authorization) and fix CI, especially Windows and macOS tests.
-2. Exercise native tool calling against a live model.
-3. WP18 (metadata bucket, versioned migration), then WP19, WP24, WP22, WP21.
+1. CI, Windows and macOS stay UNVERIFIED (no remote operations).
+2. WP18 (metadata bucket, versioned migration), then WP19, WP24, WP22, WP21.
 
 See `IMPLEMENTATION_REPORT.md`.
