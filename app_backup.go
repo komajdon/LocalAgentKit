@@ -120,6 +120,19 @@ func stageBackup(src, passphrase string) error {
 	return store.StageRestore(files[backup.Database], files[backup.Key])
 }
 
+// RotateEncryptionKey re-encrypts the data under a new key. It returns an
+// error message or "". Backups made before it still open with their own copy
+// of the old key (encrypted exports) but automatic backups, which carry none,
+// stop being restorable.
+func (a *App) RotateEncryptionKey() string {
+	a.convMu.Lock()
+	defer a.convMu.Unlock()
+	if a.GetRunState().RunID != "" {
+		return "stop the agent before rotating the key"
+	}
+	return errString(store.RotateKey())
+}
+
 // GetKeyLocation reports where the encryption key is kept: "file" or
 // "keychain".
 func (a *App) GetKeyLocation() string { return string(store.Location()) }

@@ -96,6 +96,8 @@ export function RevokeAllPermissionGrants():Promise<string>;
 
 export function RevokePermissionGrant(arg1:string):Promise<string>;
 
+export function RotateEncryptionKey():Promise<string>;
+
 export function SaveConfig(arg1:config.Config):Promise<string>;
 
 export function SaveMCPServers(arg1:Array<config.MCPServerConfig>):Promise<string>;

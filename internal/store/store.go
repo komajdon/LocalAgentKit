@@ -48,6 +48,10 @@ func Init(dir string) error {
 			initErr = fmt.Errorf("store: apply restore: %w", err)
 			return
 		}
+		if err := recoverRotation(dir); err != nil {
+			initErr = fmt.Errorf("store: recover key rotation: %w", err)
+			return
+		}
 		key, err := loadOrCreateKey(dir)
 		if err != nil {
 			initErr = fmt.Errorf("store: load encryption key: %w", err)
@@ -230,8 +234,10 @@ func decryptJSON(data []byte, out any) error {
 	return json.Unmarshal(plain, out)
 }
 
-func encrypt(plain []byte) ([]byte, error) {
-	block, err := aes.NewCipher(aesKey)
+func encrypt(plain []byte) ([]byte, error) { return encryptWith(aesKey, plain) }
+
+func encryptWith(key, plain []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}

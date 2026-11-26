@@ -11,7 +11,7 @@ import {
   ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, RecentWorkDirs, ExportDiagnostics, GetRunState, GetMCPStatus, RestartMCPServer, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, ProbeMCPServer,
-  CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation,
+  CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation, RotateEncryptionKey,
   GetContextUsage, BranchConversation, ImportConversation,
 } from '../wailsjs/go/main/App'
 import { ProfilePicker } from './components/ProfilePicker'
@@ -204,7 +204,7 @@ export default function App() {
   const [keyMsg, setKeyMsg] = useState('')
   // Risky actions need a second click. window.confirm is not used because not
   // every embedded web view implements it.
-  const [confirming, setConfirming] = useState<'' | 'restore' | 'keychain'>('')
+  const [confirming, setConfirming] = useState<'' | 'restore' | 'keychain' | 'rotate'>('')
   const moveKey = async (next: string) => {
     setConfirming(''); setKeyMsg('')
     const err = await SetKeyLocation(next)
@@ -1853,6 +1853,14 @@ export default function App() {
                       <button className="btn danger" onClick={() => moveKey('keychain')}>Move key</button>
                       <button className="btn secondary" onClick={() => setConfirming('')}>Cancel</button>
                     </div>
+                  )}
+                  {keyLocation === 'file' && (
+                    <button className={`btn ${confirming === 'rotate' ? 'danger' : 'secondary'}`} onClick={async () => {
+                      if (confirming !== 'rotate') { setConfirming('rotate'); return }
+                      setConfirming('')
+                      const err = await RotateEncryptionKey()
+                      setKeyMsg(err || 'Key rotated. Export a new backup: older automatic backups can no longer be restored.')
+                    }}>{confirming === 'rotate' ? 'Click again to rotate' : 'Rotate key'}</button>
                   )}
                   {keyMsg && <div role="alert" className="field-hint" style={{ color: 'var(--red)' }}>{keyMsg}</div>}
                   <div className="field-hint">

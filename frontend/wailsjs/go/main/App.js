@@ -174,6 +174,10 @@ export function RevokePermissionGrant(arg1) {
   return window['go']['main']['App']['RevokePermissionGrant'](arg1);
 }
 
+export function RotateEncryptionKey() {
+  return window['go']['main']['App']['RotateEncryptionKey']();
+}
+
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
 }
