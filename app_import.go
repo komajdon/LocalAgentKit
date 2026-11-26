@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -81,46 +82,132 @@ func (a *App) importFromJSON(data []byte) int {
 	return count
 }
 
-func (a *App) importRawItem(raw json.RawMessage) *history.Conversation {
-	// Both supported shapes carry a messages list; they differ only in whether
-	// the conversation is named "title" (ChatGPT style) or "name" (Claude style).
-	var chat struct {
-		Title    string `json:"title"`
-		Name     string `json:"name"`
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
+// importedChat is one conversation in any of the supported layouts.
+type importedChat struct {
+	// Simple layout: {title|name, messages: [{role, content}]}.
+	Title    string `json:"title"`
+	Name     string `json:"name"`
+	Messages []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"messages"`
+	// ChatGPT export: messages form a tree; current_node ends the shown branch.
+	Mapping     map[string]chatGPTNode `json:"mapping"`
+	CurrentNode string                 `json:"current_node"`
+	// Claude export.
+	ChatMessages []struct {
+		Sender  string `json:"sender"`
+		Text    string `json:"text"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"chat_messages"`
+}
+
+type chatGPTNode struct {
+	Parent  string `json:"parent"`
+	Message *struct {
+		Author struct {
+			Role string `json:"role"`
+		} `json:"author"`
+		Content struct {
+			Parts []any `json:"parts"`
+		} `json:"content"`
+	} `json:"message"`
+}
+
+// chatGPTBranch walks from the current node to the root, then reverses.
+func chatGPTBranch(mapping map[string]chatGPTNode, current string) []history.SavedMessage {
+	var out []history.SavedMessage
+	seen := map[string]bool{} // a damaged file must not loop forever
+	for id := current; id != "" && !seen[id]; id = mapping[id].Parent {
+		seen[id] = true
+		m := mapping[id].Message
+		if m == nil {
+			continue
+		}
+		var parts []string
+		for _, p := range m.Content.Parts {
+			// Non-text parts, such as images, are objects and are skipped.
+			if text, ok := p.(string); ok && text != "" {
+				parts = append(parts, text)
+			}
+		}
+		if len(parts) > 0 {
+			out = append(out, history.SavedMessage{Role: m.Author.Role, Content: strings.Join(parts, "\n")})
+		}
 	}
-	if err := json.Unmarshal(raw, &chat); err != nil || len(chat.Messages) == 0 {
+	slices.Reverse(out)
+	return out
+}
+
+func (c importedChat) messages() (source string, out []history.SavedMessage) {
+	switch {
+	case len(c.Mapping) > 0:
+		return "chatgpt", chatGPTBranch(c.Mapping, c.CurrentNode)
+	case len(c.ChatMessages) > 0:
+		for _, m := range c.ChatMessages {
+			role := m.Sender
+			if role == "human" {
+				role = "user"
+			}
+			text := m.Text
+			if text == "" {
+				var parts []string
+				for _, block := range m.Content {
+					if block.Type == "text" && block.Text != "" {
+						parts = append(parts, block.Text)
+					}
+				}
+				text = strings.Join(parts, "\n")
+			}
+			if text != "" {
+				out = append(out, history.SavedMessage{Role: role, Content: text})
+			}
+		}
+		return "claude", out
+	}
+	for _, m := range c.Messages {
+		out = append(out, history.SavedMessage{Role: m.Role, Content: m.Content})
+	}
+	if c.Title == "" && c.Name != "" {
+		return "claude", out
+	}
+	return "chatgpt", out
+}
+
+func (a *App) importRawItem(raw json.RawMessage) *history.Conversation {
+	var chat importedChat
+	if err := json.Unmarshal(raw, &chat); err != nil {
+		return nil
+	}
+	source, all := chat.messages()
+	// Only what the user and the assistant said is imported. Imported text
+	// must never pose as a system prompt or a tool result.
+	msgs := []history.SavedMessage{}
+	for _, m := range all {
+		if m.Role == "assistant" || (m.Role == "user" && !strings.HasPrefix(m.Content, "TOOL_RESULT")) {
+			msgs = append(msgs, m)
+		}
+	}
+	if len(msgs) == 0 {
 		return nil
 	}
 
-	prefix, title, fallback := "chatgpt", chat.Title, "ChatGPT import"
-	if title == "" && chat.Name != "" {
-		prefix, title, fallback = "claude", chat.Name, "Claude import"
+	title := chat.Title
+	if title == "" {
+		title = chat.Name
 	}
 	if title == "" {
-		title = fallback
+		title = map[string]string{"chatgpt": "ChatGPT import", "claude": "Claude import"}[source]
 	}
-
 	now := time.Now()
-	conv := &history.Conversation{
-		ConvMeta: history.ConvMeta{
-			ID:        conversationID(prefix, 0),
-			Title:     title,
-			CreatedAt: now,
-			UpdatedAt: now,
-		},
-		Messages: make([]history.SavedMessage, 0, len(chat.Messages)),
+	return &history.Conversation{
+		ConvMeta:     history.ConvMeta{ID: conversationID(source, 0), Title: title, CreatedAt: now, UpdatedAt: now},
+		Messages:     msgs,
+		DisplayItems: displayItemsFromMessages(msgs),
 	}
-	for _, m := range chat.Messages {
-		if m.Role == "user" || m.Role == "assistant" {
-			conv.Messages = append(conv.Messages, history.SavedMessage{Role: m.Role, Content: m.Content})
-		}
-	}
-	conv.DisplayItems = displayItemsFromMessages(conv.Messages)
-	return conv
 }
 
 func conversationID(prefix string, offset int) string {
