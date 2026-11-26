@@ -2,9 +2,10 @@
 // All values are AES-256-GCM encrypted before being written to disk,
 // so the on-disk file is never human-readable plain text.
 //
-// The encryption key is generated randomly on first run and persisted
-// in <dataDir>/agent.key (mode 0600). Losing that file means losing
-// access to the encrypted data.
+// The encryption key is generated randomly on first run. It is kept in
+// <dataDir>/agent.key (mode 0600) by default, which protects the database
+// only from someone who gets the database without the key file, or in the OS
+// keychain if the user moves it there. Losing the key means losing the data.
 package store
 
 import (
@@ -15,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -26,6 +26,7 @@ import (
 
 var (
 	db      *bolt.DB
+	dataDir string
 	aesKey  []byte
 	once    sync.Once
 	initErr error
@@ -40,6 +41,11 @@ func Init(dir string) error {
 	once.Do(func() {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			initErr = fmt.Errorf("store: create data dir: %w", err)
+			return
+		}
+		dataDir = dir
+		if err := applyPendingRestore(dir); err != nil {
+			initErr = fmt.Errorf("store: apply restore: %w", err)
 			return
 		}
 		key, err := loadOrCreateKey(dir)
@@ -206,43 +212,6 @@ func Scan(bucket string, fn func(key string, rawJSON []byte) error) error {
 	})
 }
 
-// ── Key management ────────────────────────────────────────────────────────────
-
-// loadOrCreateKey reads the 32-byte key in dir. A new key is generated only
-// when there is neither a key nor a database: an existing key is never
-// replaced, because whatever it encrypted would be lost for good.
-func loadOrCreateKey(dir string) ([]byte, error) {
-	path := filepath.Join(dir, "agent.key")
-	data, err := os.ReadFile(path)
-	switch {
-	case err == nil && len(data) == 32:
-		return data, nil
-	case err == nil:
-		return nil, fmt.Errorf("%s is damaged (%d bytes, expected 32); restore it from a backup", path, len(data))
-	case !errors.Is(err, fs.ErrNotExist):
-		return nil, err
-	}
-	if _, err := os.Stat(filepath.Join(dir, "agent.db")); err == nil {
-		return nil, fmt.Errorf("%s is missing but the database exists; restore the key from a backup", path)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
-	}
-	key := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, key); err != nil {
-		return nil, err
-	}
-	// O_EXCL: never write over a key created in the meantime.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return nil, err
-	}
-	_, werr := f.Write(key)
-	if err := errors.Join(werr, f.Sync(), f.Close()); err != nil {
-		return nil, err
-	}
-	return key, nil
-}
-
 // ── Crypto ────────────────────────────────────────────────────────────────────
 
 func encryptJSON(v any) ([]byte, error) {
@@ -277,8 +246,10 @@ func encrypt(plain []byte) ([]byte, error) {
 	return gcm.Seal(nonce, nonce, plain, nil), nil
 }
 
-func decrypt(data []byte) ([]byte, error) {
-	block, err := aes.NewCipher(aesKey)
+func decrypt(data []byte) ([]byte, error) { return decryptWith(aesKey, data) }
+
+func decryptWith(key, data []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}

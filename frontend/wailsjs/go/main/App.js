@@ -14,8 +14,8 @@ export function DeleteConversation(arg1) {
   return window['go']['main']['App']['DeleteConversation'](arg1);
 }
 
-export function ExportBackup() {
-  return window['go']['main']['App']['ExportBackup']();
+export function ExportBackup(arg1) {
+  return window['go']['main']['App']['ExportBackup'](arg1);
 }
 
 export function ExportConversation(arg1, arg2) {
@@ -28,6 +28,10 @@ export function GetConfig() {
 
 export function GetContextUsage() {
   return window['go']['main']['App']['GetContextUsage']();
+}
+
+export function GetKeyLocation() {
+  return window['go']['main']['App']['GetKeyLocation']();
 }
 
 export function GetSandboxStatus() {
@@ -46,8 +50,8 @@ export function GetVersion() {
   return window['go']['main']['App']['GetVersion']();
 }
 
-export function ImportBackup() {
-  return window['go']['main']['App']['ImportBackup']();
+export function ImportBackup(arg1) {
+  return window['go']['main']['App']['ImportBackup'](arg1);
 }
 
 export function ImportConversation() {
@@ -132,6 +136,10 @@ export function SetConversationPinned(arg1, arg2) {
 
 export function SetConversationTags(arg1, arg2) {
   return window['go']['main']['App']['SetConversationTags'](arg1, arg2);
+}
+
+export function SetKeyLocation(arg1) {
+  return window['go']['main']['App']['SetKeyLocation'](arg1);
 }
 
 export function StartRecording() {

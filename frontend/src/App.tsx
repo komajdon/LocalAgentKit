@@ -11,7 +11,7 @@ import {
   ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, ProbeMCPServer,
-  CheckForUpdate, GetVersion, ExportBackup, ImportBackup,
+  CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation,
   GetUsageBudget, GetContextUsage, BranchConversation, ImportConversation,
 } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
@@ -170,6 +170,18 @@ export default function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false)
   const [appVersion, setAppVersion] = useState('')
   const [backupMsg, setBackupMsg] = useState('')
+  const [passphrase, setPassphrase] = useState('')
+  const [keyLocation, setKeyLocation] = useState('file')
+  const [keyMsg, setKeyMsg] = useState('')
+  // Risky actions need a second click. window.confirm is not used because not
+  // every embedded web view implements it.
+  const [confirming, setConfirming] = useState<'' | 'restore' | 'keychain'>('')
+  const moveKey = async (next: string) => {
+    setConfirming(''); setKeyMsg('')
+    const err = await SetKeyLocation(next)
+    if (err) setKeyMsg(err)
+    GetKeyLocation().then(setKeyLocation)
+  }
 
   // search
   const [searchQuery, setSearchQuery]   = useState('')
@@ -220,6 +232,13 @@ export default function App() {
     RespondPermission(permReq.id, decision)
     setPermReq(null)
   }
+
+  useEffect(() => {
+    if (showCfg) {
+      setPassphrase(''); setKeyMsg(''); setConfirming('')
+      GetKeyLocation().then(setKeyLocation).catch(() => {})
+    }
+  }, [showCfg])
 
   // MCP UI state
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
@@ -1630,28 +1649,63 @@ export default function App() {
                 </div>
 
                 <div className="field">
-                  <label>Data Backup</label>
+                  <label htmlFor="backup-passphrase">Data Backup</label>
+                  <input id="backup-passphrase" type="password" autoComplete="new-password"
+                    placeholder="Backup passphrase (8+ characters)"
+                    value={passphrase} onChange={e => setPassphrase(e.target.value)} />
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button className="btn secondary" onClick={async () => {
                       setBackupMsg('')
-                      const err = await ExportBackup() as any
-                      setBackupMsg(err || '✓ Backup saved')
-                    }}>Export backup…</button>
-                    <button className="btn secondary" onClick={async () => {
-                      setBackupMsg('')
-                      const result = await ImportBackup() as any
-                      if (result === 'ok') setBackupMsg('✓ Restored — please restart the app')
+                      const result = await ExportBackup(passphrase)
+                      if (result === 'ok') setBackupMsg('✓ Encrypted backup saved')
                       else if (result) setBackupMsg('✗ ' + result)
-                    }}>Restore backup…</button>
+                    }}>Export backup…</button>
+                    <button className={`btn ${confirming === 'restore' ? 'danger' : 'secondary'}`} onClick={async () => {
+                      if (confirming !== 'restore') { setConfirming('restore'); return }
+                      setConfirming('')
+                      setBackupMsg('')
+                      const result = await ImportBackup(passphrase)
+                      if (result === 'ok') setBackupMsg('✓ Backup checked — quit and reopen the app to apply it')
+                      else if (result) setBackupMsg('✗ ' + result)
+                    }}>{confirming === 'restore' ? 'Click again to choose a backup' : 'Restore backup…'}</button>
                   </div>
+                  {confirming === 'restore' && (
+                    <div role="alert" className="field-hint">
+                      Restoring replaces all conversations and settings at the next start. A copy of the current data is kept in the data folder.
+                    </div>
+                  )}
                   {backupMsg && (
-                    <div className="field-hint" style={{ color: backupMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)' }}>
+                    <div role="status" className="field-hint" style={{ color: backupMsg.startsWith('✓') ? 'var(--green)' : 'var(--red)' }}>
                       {backupMsg}
                     </div>
                   )}
                   <div className="field-hint">
-                    Exports <code>agent.db</code> + <code>agent.key</code> as a <code>.tar.gz</code>.
-                    Auto-backups are saved to <code>data/backups/</code> on exit (up to 7).
+                    Exports are encrypted with the passphrase, which cannot be recovered. Automatic backups
+                    in <code>data/backups/</code> (up to 7) contain no key, so they only restore while this
+                    installation still has its key.
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="key-location">Encryption key</label>
+                  <select id="key-location" value={confirming === 'keychain' ? 'keychain' : keyLocation} onChange={e => {
+                    if (e.target.value === 'keychain') { setConfirming('keychain'); return }
+                    moveKey('file')
+                  }}>
+                    <option value="file">File beside the database (portable)</option>
+                    <option value="keychain">System keychain</option>
+                  </select>
+                  {confirming === 'keychain' && keyLocation !== 'keychain' && (
+                    <div role="alert" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span className="field-hint">The data folder will then only open under this user account. Export a passphrase backup first.</span>
+                      <button className="btn danger" onClick={() => moveKey('keychain')}>Move key</button>
+                      <button className="btn secondary" onClick={() => setConfirming('')}>Cancel</button>
+                    </div>
+                  )}
+                  {keyMsg && <div role="alert" className="field-hint" style={{ color: 'var(--red)' }}>{keyMsg}</div>}
+                  <div className="field-hint">
+                    With the key in a file, anyone who can read the data folder can read your conversations.
+                    Backups made by earlier versions also contain the key; delete them if that matters.
                   </div>
                 </div>
 

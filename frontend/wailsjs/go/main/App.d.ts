@@ -13,13 +13,15 @@ export function CheckForUpdate():Promise<main.UpdateInfo>;
 
 export function DeleteConversation(arg1:string):Promise<void>;
 
-export function ExportBackup():Promise<string>;
+export function ExportBackup(arg1:string):Promise<string>;
 
 export function ExportConversation(arg1:string,arg2:string):Promise<string>;
 
 export function GetConfig():Promise<config.Config>;
 
 export function GetContextUsage():Promise<app.ContextUsage>;
+
+export function GetKeyLocation():Promise<string>;
 
 export function GetSandboxStatus():Promise<sandbox.Status>;
 
@@ -29,7 +31,7 @@ export function GetUsageBudget():Promise<main.UsageBudget>;
 
 export function GetVersion():Promise<string>;
 
-export function ImportBackup():Promise<string>;
+export function ImportBackup(arg1:string):Promise<string>;
 
 export function ImportConversation():Promise<string>;
 
@@ -72,6 +74,8 @@ export function SetConversationModel(arg1:string):Promise<void>;
 export function SetConversationPinned(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetConversationTags(arg1:string,arg2:Array<string>):Promise<void>;
+
+export function SetKeyLocation(arg1:string):Promise<string>;
 
 export function StartRecording():Promise<void>;
 

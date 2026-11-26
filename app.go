@@ -1,17 +1,12 @@
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -42,7 +37,8 @@ type App struct {
 	ctx context.Context
 	cfg config.Config
 
-	startupErr string // set once during startup
+	startupErr    string // set once during startup
+	restoreStaged bool   // guarded by mu
 
 	mu       sync.Mutex
 	agent    *appLayer.ConversationalAgent
@@ -86,46 +82,22 @@ func (a *App) startup(ctx context.Context) {
 	a.globalTokens = p + c
 }
 
-func (a *App) shutdown(_ context.Context) {
-	a.writeAutoBackup()
+func (a *App) shutdown(ctx context.Context) {
+	a.mu.Lock()
+	restoring := a.restoreStaged
+	a.mu.Unlock()
+	// After a restore was staged, keep the archives from before it intact.
+	if !restoring && a.startupErr == "" {
+		if err := writeAutoBackup(filepath.Join(store.DataDir(), "backups")); err != nil {
+			runtime.LogErrorf(ctx, "automatic backup failed: %v", err)
+		}
+	}
 	tools.ShutdownMCPClients()
 	_ = store.Close()
 }
 
 // GetStartupError reports why the app could not start properly, or "".
 func (a *App) GetStartupError() string { return a.startupErr }
-
-// ── Auto-backup ─────────────────────────────────────────────────────────────────
-
-const maxBackupArchives = 7
-
-// writeAutoBackup creates a timestamped backup archive in data/backups/ and prunes
-// old archives down to maxBackupArchives. Safe to call multiple times.
-func (a *App) writeAutoBackup() {
-	dataDir := store.DataDir()
-	backupDir := filepath.Join(dataDir, "backups")
-	if err := os.MkdirAll(backupDir, 0700); err != nil {
-		return
-	}
-	now := time.Now().Format("2006-01-02_150405")
-	dest := filepath.Join(backupDir, "backup-"+now+".tar.gz")
-	if err := writeBackupArchive(dest, dataDir); err != nil {
-		return
-	}
-	// Prune old archives — keep only the N most recent.
-	entries, err := filepath.Glob(filepath.Join(backupDir, "backup-*.tar.gz"))
-	if err != nil {
-		return
-	}
-	if len(entries) > maxBackupArchives {
-		sort.Strings(entries)
-		// Sort lexicographically (ISO timestamps) so oldest come first.
-		toRemove := len(entries) - maxBackupArchives
-		for i := 0; i < toRemove; i++ {
-			_ = os.Remove(entries[i])
-		}
-	}
-}
 
 // ── Branching ───────────────────────────────────────────────────────────────────
 
@@ -1026,130 +998,6 @@ func isNewerVersion(latest, current string) bool {
 		}
 	}
 	return false
-}
-
-// ── Config backup & restore ───────────────────────────────────────────────────
-
-// ExportBackup opens a save-file dialog and writes a .tar.gz containing
-// agent.db and agent.key. Returns an error string or "" on success.
-func (a *App) ExportBackup() string {
-	dest, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "Export Backup",
-		DefaultFilename: "ai-agent-backup.tar.gz",
-		Filters: []runtime.FileFilter{
-			{DisplayName: "Backup archive (*.tar.gz)", Pattern: "*.tar.gz"},
-		},
-	})
-	if err != nil || dest == "" {
-		return ""
-	}
-
-	dataDir := store.DataDir()
-	if err := writeBackupArchive(dest, dataDir); err != nil {
-		return "Backup failed: " + err.Error()
-	}
-	return ""
-}
-
-// ImportBackup opens a file-picker dialog and restores agent.db + agent.key
-// from a .tar.gz created by ExportBackup. The app must be restarted afterward.
-// Returns an error string or "" on success.
-func (a *App) ImportBackup() string {
-	src, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Restore Backup",
-		Filters: []runtime.FileFilter{
-			{DisplayName: "Backup archive (*.tar.gz)", Pattern: "*.tar.gz"},
-		},
-	})
-	if err != nil || src == "" {
-		return ""
-	}
-
-	dataDir := store.DataDir()
-	if err := readBackupArchive(src, dataDir); err != nil {
-		return "Restore failed: " + err.Error()
-	}
-	return "ok" // signal frontend to prompt for restart
-}
-
-func writeBackupArchive(dest, dataDir string) (err error) {
-	f, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	gz := gzip.NewWriter(f)
-	tw := tar.NewWriter(gz)
-	// Close in reverse order and report failures: each Close flushes data, so
-	// ignoring one could report a truncated archive as a successful backup.
-	defer func() {
-		err = errors.Join(err, tw.Close(), gz.Close(), f.Close())
-	}()
-
-	for _, name := range []string{"agent.db", "agent.key"} {
-		path := filepath.Join(dataDir, name)
-		fi, err := os.Stat(path)
-		if err != nil {
-			continue // skip missing files (e.g. key not yet created)
-		}
-		hdr, err := tar.FileInfoHeader(fi, "")
-		if err != nil {
-			return err
-		}
-		hdr.Name = name
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if _, err := tw.Write(data); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func readBackupArchive(src, dataDir string) error {
-	f, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = gz.Close() }()
-
-	if err := os.MkdirAll(dataDir, 0700); err != nil {
-		return err
-	}
-
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		// Only restore the two known files; ignore anything else.
-		if hdr.Name != "agent.db" && hdr.Name != "agent.key" {
-			continue
-		}
-		dest := filepath.Join(dataDir, hdr.Name)
-		data, err := io.ReadAll(tr)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(dest, data, 0600); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (a *App) GetConfig() config.Config {
