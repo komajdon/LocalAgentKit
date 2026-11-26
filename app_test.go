@@ -109,6 +109,7 @@ func TestImportFromJSON(t *testing.T) {
 	}{
 		{"own", `{"id":"x","title":"Own one","messages":[{"role":"user","content":"hi"}]}`, 1, "Own one"},
 		{"chatgpt", `[{"title":"GPT one","messages":[{"role":"user","content":"hi"}]}]`, 1, "GPT one"},
+		{"claude", `[{"name":"Claude one","messages":[{"role":"user","content":"hi"}]}]`, 1, "Claude one"},
 		{"invalid", `{"nope":1}`, 0, ""},
 		{"garbage", `not json`, 0, ""},
 	}

@@ -279,72 +279,45 @@ func (a *App) importFromJSON(data []byte) int {
 }
 
 func (a *App) importRawItem(raw json.RawMessage) *history.Conversation {
-	// Try ChatGPT format: {title, messages: [{role, content}]}
-	var chatGPTChat struct {
+	// Both supported shapes carry a messages list; they differ only in whether
+	// the conversation is named "title" (ChatGPT style) or "name" (Claude style).
+	var chat struct {
 		Title    string `json:"title"`
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(raw, &chatGPTChat); err == nil && len(chatGPTChat.Messages) > 0 {
-		now := time.Now()
-		conv := &history.Conversation{
-			ConvMeta: history.ConvMeta{
-				ID:        conversationID("chatgpt", 0),
-				Title:     chatGPTChat.Title,
-				WorkDir:   "",
-				CreatedAt: now,
-				UpdatedAt: now,
-			},
-			Messages: make([]history.SavedMessage, 0, len(chatGPTChat.Messages)),
-		}
-		if conv.Title == "" {
-			conv.Title = "ChatGPT import"
-		}
-		for _, m := range chatGPTChat.Messages {
-			if m.Role == "user" || m.Role == "assistant" {
-				conv.Messages = append(conv.Messages, history.SavedMessage{Role: m.Role, Content: m.Content})
-			}
-		}
-		conv.DisplayItems = displayItemsFromMessages(conv.Messages)
-		return conv
-	}
-
-	// Try Claude format: {name, messages: [{role, content}]}
-	var claudeChat struct {
 		Name     string `json:"name"`
 		Messages []struct {
 			Role    string `json:"role"`
 			Content string `json:"content"`
 		} `json:"messages"`
 	}
-	if err := json.Unmarshal(raw, &claudeChat); err == nil && len(claudeChat.Messages) > 0 {
-		now := time.Now()
-		title := claudeChat.Name
-		if title == "" {
-			title = "Claude import"
-		}
-		conv := &history.Conversation{
-			ConvMeta: history.ConvMeta{
-				ID:        conversationID("claude", 0),
-				Title:     title,
-				WorkDir:   "",
-				CreatedAt: now,
-				UpdatedAt: now,
-			},
-			Messages: make([]history.SavedMessage, 0, len(claudeChat.Messages)),
-		}
-		for _, m := range claudeChat.Messages {
-			if m.Role == "user" || m.Role == "assistant" {
-				conv.Messages = append(conv.Messages, history.SavedMessage{Role: m.Role, Content: m.Content})
-			}
-		}
-		conv.DisplayItems = displayItemsFromMessages(conv.Messages)
-		return conv
+	if err := json.Unmarshal(raw, &chat); err != nil || len(chat.Messages) == 0 {
+		return nil
 	}
 
-	return nil
+	prefix, title, fallback := "chatgpt", chat.Title, "ChatGPT import"
+	if title == "" && chat.Name != "" {
+		prefix, title, fallback = "claude", chat.Name, "Claude import"
+	}
+	if title == "" {
+		title = fallback
+	}
+
+	now := time.Now()
+	conv := &history.Conversation{
+		ConvMeta: history.ConvMeta{
+			ID:        conversationID(prefix, 0),
+			Title:     title,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		Messages: make([]history.SavedMessage, 0, len(chat.Messages)),
+	}
+	for _, m := range chat.Messages {
+		if m.Role == "user" || m.Role == "assistant" {
+			conv.Messages = append(conv.Messages, history.SavedMessage{Role: m.Role, Content: m.Content})
+		}
+	}
+	conv.DisplayItems = displayItemsFromMessages(conv.Messages)
+	return conv
 }
 
 func conversationID(prefix string, offset int) string {
