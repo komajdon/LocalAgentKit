@@ -142,6 +142,17 @@ func Get(bucket, key string, out any) error {
 	})
 }
 
+// Has reports whether a value exists at bucket/key.
+func Has(bucket, key string) bool {
+	found := false
+	_ = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		found = b != nil && b.Get([]byte(key)) != nil
+		return nil
+	})
+	return found
+}
+
 // Delete removes key from bucket (no-op if either does not exist).
 func Delete(bucket, key string) error {
 	return db.Update(func(tx *bolt.Tx) error {

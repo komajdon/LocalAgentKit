@@ -62,6 +62,10 @@ export function ListModels() {
   return window['go']['main']['App']['ListModels']();
 }
 
+export function ListPermissionGrants() {
+  return window['go']['main']['App']['ListPermissionGrants']();
+}
+
 export function ListTools() {
   return window['go']['main']['App']['ListTools']();
 }
@@ -86,8 +90,16 @@ export function RenameConversation(arg1, arg2) {
   return window['go']['main']['App']['RenameConversation'](arg1, arg2);
 }
 
-export function RespondPermission(arg1) {
-  return window['go']['main']['App']['RespondPermission'](arg1);
+export function RespondPermission(arg1, arg2) {
+  return window['go']['main']['App']['RespondPermission'](arg1, arg2);
+}
+
+export function RevokeAllPermissionGrants() {
+  return window['go']['main']['App']['RevokeAllPermissionGrants']();
+}
+
+export function RevokePermissionGrant(arg1) {
+  return window['go']['main']['App']['RevokePermissionGrant'](arg1);
 }
 
 export function SaveConfig(arg1) {

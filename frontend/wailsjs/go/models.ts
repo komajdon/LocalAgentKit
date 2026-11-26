@@ -329,6 +329,31 @@ export namespace main {
 
 }
 
+export namespace permission {
+	
+	export class Grant {
+	    id: string;
+	    workspace: string;
+	    tool: string;
+	    label: string;
+	    scope: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Grant(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.workspace = source["workspace"];
+	        this.tool = source["tool"];
+	        this.label = source["label"];
+	        this.scope = source["scope"];
+	    }
+	}
+
+}
+
 export namespace sandbox {
 	
 	export class Status {

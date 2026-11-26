@@ -22,6 +22,7 @@ import (
 	"agent-gui/domain"
 	"agent-gui/internal/config"
 	"agent-gui/internal/history"
+	"agent-gui/internal/permission"
 	"agent-gui/internal/recorder"
 	"agent-gui/internal/sandbox"
 	"agent-gui/internal/store"
@@ -44,7 +45,10 @@ type App struct {
 	mu       sync.Mutex
 	agent    *appLayer.ConversationalAgent
 	cancelFn context.CancelFunc
-	permCh   chan bool
+
+	permissions *permission.Manager
+	pending     *pendingPrompt // guarded by mu
+	promptSeq   uint64         // guarded by mu
 
 	activeConv *history.Conversation
 
@@ -56,7 +60,11 @@ type App struct {
 	recSes *recorder.Session
 }
 
-func NewApp() *App { return &App{} }
+func NewApp() *App {
+	// Without a store this cannot fail; startup reloads persisted grants.
+	m, _ := permission.NewManager(nil)
+	return &App{permissions: m}
+}
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
@@ -65,6 +73,11 @@ func (a *App) startup(ctx context.Context) {
 		runtime.EventsEmit(ctx, "app:fatal", "Failed to open data store: "+err.Error())
 	}
 	a.cfg = config.Load()
+	m, err := permission.NewManager(grantStore{})
+	if err != nil {
+		runtime.LogErrorf(ctx, "saved approvals could not be read; you will be asked again: %v", err)
+	}
+	a.permissions = m
 	p, c := history.TotalUsage()
 	a.globalTokens = p + c
 }
@@ -417,35 +430,7 @@ func (a *App) buildAgent(workDir string) *appLayer.ConversationalAgent {
 		runtime.EventsEmit(a.ctx, "chat:context_usage", usage)
 	}
 	agent.OnPermissionRequest = func(req appLayer.PermissionRequest) bool {
-		a.mu.Lock()
-		perm := a.cfg.ToolPermissions[req.Tool]
-		a.mu.Unlock()
-
-		switch perm {
-		case config.PermAllow:
-			runtime.EventsEmit(a.ctx, "chat:tool_auto_allowed", req.Tool)
-			return true
-		case config.PermDeny:
-			runtime.EventsEmit(a.ctx, "chat:tool_auto_denied", req.Tool)
-			return false
-		}
-
-		ch := make(chan bool, 1)
-		a.mu.Lock()
-		a.permCh = ch
-		a.mu.Unlock()
-		runtime.EventsEmit(a.ctx, "chat:permission_request", req)
-		var result bool
-		select {
-		case result = <-ch:
-		case <-time.After(5 * time.Minute):
-			// Auto-deny if user never responds within 5 minutes.
-			result = false
-		}
-		a.mu.Lock()
-		a.permCh = nil
-		a.mu.Unlock()
-		return result
+		return a.authorize(workDir, req)
 	}
 
 	return agent
@@ -923,18 +908,7 @@ func (a *App) StopAgent() {
 	defer a.mu.Unlock()
 	if a.cancelFn != nil {
 		a.cancelFn()
-		if a.permCh != nil {
-			a.permCh <- false
-		}
-	}
-}
-
-func (a *App) RespondPermission(allow bool) {
-	a.mu.Lock()
-	ch := a.permCh
-	a.mu.Unlock()
-	if ch != nil {
-		ch <- allow
+		a.replyLocked("")
 	}
 }
 
@@ -1190,7 +1164,9 @@ func (a *App) SaveConfig(cfg config.Config) string {
 	if strings.HasPrefix(cfg.SearchAPIKey, "***") {
 		cfg.SearchAPIKey = a.cfg.SearchAPIKey
 	}
+	a.mu.Lock()
 	a.cfg = cfg
+	a.mu.Unlock()
 	if err := config.Save(cfg); err != nil {
 		return err.Error()
 	}

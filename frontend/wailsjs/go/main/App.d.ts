@@ -5,6 +5,7 @@ import {main} from '../models';
 import {config} from '../models';
 import {app} from '../models';
 import {sandbox} from '../models';
+import {permission} from '../models';
 
 export function BranchConversation(arg1:string,arg2:number):Promise<history.Conversation>;
 
@@ -36,6 +37,8 @@ export function ListMCPServers():Promise<Array<config.MCPServerConfig>>;
 
 export function ListModels():Promise<main.ModelList>;
 
+export function ListPermissionGrants():Promise<Array<permission.Grant>>;
+
 export function ListTools():Promise<Array<main.ToolInfo>>;
 
 export function LoadConversation(arg1:string):Promise<history.Conversation>;
@@ -48,7 +51,11 @@ export function ProbeMCPServer(arg1:config.MCPServerConfig):Promise<Array<string
 
 export function RenameConversation(arg1:string,arg2:string):Promise<void>;
 
-export function RespondPermission(arg1:boolean):Promise<void>;
+export function RespondPermission(arg1:string,arg2:string):Promise<void>;
+
+export function RevokeAllPermissionGrants():Promise<string>;
+
+export function RevokePermissionGrant(arg1:string):Promise<string>;
 
 export function SaveConfig(arg1:config.Config):Promise<string>;
 

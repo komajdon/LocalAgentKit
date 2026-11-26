@@ -3,6 +3,7 @@ import { Markdown } from './Markdown'
 import './style.css'
 import {
   SendMessage, StopAgent, RespondPermission,
+  ListPermissionGrants, RevokePermissionGrant, RevokeAllPermissionGrants,
   ListConversations, NewConversation, LoadConversation,
   DeleteConversation, UpdateConversationPath, RenameConversation,
   SearchConversations, ExportConversation, SetConversationModel,
@@ -26,7 +27,12 @@ interface SavedConv extends ConvMeta {
   messages: { role: string; content: string }[]
   display_items?: any[]
 }
-interface PermReq { tool: string; description: string; args: Record<string, string> }
+interface PermReq {
+  id: string; tool: string; description: string; args: Record<string, string>
+  workspace: string; operation: string; target: string; impact: string
+  sensitive: boolean; scope: string
+}
+interface Grant { id: string; workspace: string; tool: string; label: string; scope: string }
 interface ToolInfo { name: string; description: string }
 
 type MsgRole = 'user' | 'assistant'
@@ -202,6 +208,18 @@ export default function App() {
   useEffect(() => {
     if (showCfg) GetSandboxStatus().then(setSandboxStatus).catch(() => setSandboxStatus(null))
   }, [showCfg])
+
+  // Remembered approvals, listed in Settings so they can be revoked.
+  const [grants, setGrants] = useState<Grant[]>([])
+  const refreshGrants = () => ListPermissionGrants().then(g => setGrants((g as any) || [])).catch(() => setGrants([]))
+  useEffect(() => {
+    if (showCfg && cfgTab === 'permissions') refreshGrants()
+  }, [showCfg, cfgTab])
+  const answerPermission = (decision: 'once' | 'session' | 'workspace' | 'deny') => {
+    if (!permReq) return
+    RespondPermission(permReq.id, decision)
+    setPermReq(null)
+  }
 
   // MCP UI state
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
@@ -405,6 +423,10 @@ export default function App() {
     offs.push(EventsOn('chat:permission_request', (req: PermReq) => {
       setPermReq(req)
       notify('Permission needed', `The agent wants to run "${req.tool}" — your approval is required.`)
+    }))
+
+    offs.push(EventsOn('chat:permission_closed', (id: string) => {
+      setPermReq(cur => (cur?.id === id ? null : cur))
     }))
 
     offs.push(EventsOn('chat:context_usage', (u: ContextUsage) => setCtxUsage(u)))
@@ -1150,7 +1172,7 @@ export default function App() {
               <div className="modal-ico ico-perm">🔐</div>
               <div>
                 <h2>Permission Request</h2>
-                <p>The agent wants to execute a tool. Allow or deny?</p>
+                <p>{permReq.operation}{permReq.sensitive ? ' — sensitive action' : ''}</p>
               </div>
             </div>
             <div className="modal-body">
@@ -1162,6 +1184,24 @@ export default function App() {
                 <div className="perm-kv">
                   <div className="perm-key">What it does</div>
                   <div className="perm-val">{permReq.description}</div>
+                </div>
+                {permReq.target && (
+                  <div className="perm-kv">
+                    <div className="perm-key">Target</div>
+                    <pre className="arg-shell-cmd">{permReq.target}</pre>
+                  </div>
+                )}
+                <div className="perm-kv">
+                  <div className="perm-key">Potential impact</div>
+                  <div className="perm-val">{permReq.impact}</div>
+                </div>
+                <div className="perm-kv">
+                  <div className="perm-key">Workspace</div>
+                  <div className="perm-val">{permReq.workspace}</div>
+                </div>
+                <div className="perm-kv">
+                  <div className="perm-key">Remembering an approval covers</div>
+                  <div className="perm-val">{permReq.scope}</div>
                 </div>
                 {Object.keys(permReq.args).length > 0 && (
                   <div className="perm-kv">
@@ -1185,8 +1225,10 @@ export default function App() {
               </div>
             </div>
             <div className="modal-ft">
-              <button className="btn danger" onClick={() => { setPermReq(null); RespondPermission(false) }}>✕ Deny</button>
-              <button className="btn primary" onClick={() => { setPermReq(null); RespondPermission(true) }}>✓ Allow</button>
+              <button className="btn danger" onClick={() => answerPermission('deny')}>✕ Deny</button>
+              <button className="btn secondary" onClick={() => answerPermission('session')}>Allow this session</button>
+              <button className="btn secondary" onClick={() => answerPermission('workspace')}>Always in this workspace</button>
+              <button className="btn primary" onClick={() => answerPermission('once')}>✓ Allow once</button>
             </div>
           </div>
         </div>
@@ -1665,6 +1707,22 @@ export default function App() {
                       </div>
                     )
                   })}
+                </div>
+                <div className="field">
+                  <label>Remembered approvals</label>
+                  {grants.length === 0 && <div className="field-hint">None.</div>}
+                  {grants.map(g => (
+                    <div key={g.id} className="perm-row">
+                      <div className="perm-row-info">
+                        <div className="perm-tool-name">{g.tool} · {g.scope === 'session' ? 'this session' : 'workspace'}</div>
+                        <div className="perm-tool-desc" title={`${g.workspace}: ${g.label}`}>{g.workspace}: {g.label}</div>
+                      </div>
+                      <button className="btn secondary" onClick={() => RevokePermissionGrant(g.id).then(refreshGrants)}>Revoke</button>
+                    </div>
+                  ))}
+                  {grants.length > 0 && (
+                    <button className="btn danger" onClick={() => RevokeAllPermissionGrants().then(refreshGrants)}>Revoke all</button>
+                  )}
                 </div>
               </div>
             )}
