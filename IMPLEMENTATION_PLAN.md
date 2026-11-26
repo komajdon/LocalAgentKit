@@ -39,21 +39,21 @@ Status: `todo`, `done`, `partial`, `blocked`. Priority P0 = security/data integr
 | WP09 | Keychain, migration, encrypted backups (4.5) | P0 | WP03 | Old data still readable; no raw key in backups | done `8f367b9` `419b509`; keychain opt-in; no key rotation; real OS keychain not exercised |
 | WP10 | WebView hardening (4.6) | P0 | – | Deny by default; CSP; mic only on request | done `2228916`; verified on Linux only |
 | WP11 | Credential redaction (4.7) | P0 | – | Keys absent from errors and URLs where possible | done `608acf8` |
-| WP12 | Typed args and context in tools (5, 9) | P1 | WP03 | JSON-typed args; Stop cancels shell, MCP, search, documents | todo |
-| WP13 | Native tool calling (5) | P1 | WP12 | OpenAI and Ollama native calls; multiline text fallback | todo |
-| WP14 | Streaming and retry (6) | P1 | WP13 | No duplicate output; backoff, jitter, Retry-After | todo |
-| WP15 | Conversation concurrency (7) | P0 | WP12 | Events carry conversation and run IDs; race tests pass | todo |
-| WP16 | MCP lifecycle (8) | P1 | WP12 | One shared process per server config; status and restart | todo |
-| WP17 | Context management (10) | P1 | WP13 | Whole turns trimmed; system prompt counted once | todo |
-| WP18 | Storage and backups (11) | P1 | WP15 | Metadata bucket, migration, consistent snapshots | todo |
+| WP12 | Typed args and context in tools (5, 9) | P1 | WP03 | JSON-typed args; Stop cancels shell, MCP, search, documents | done `0262097`; no configurable budgets |
+| WP13 | Native tool calling (5) | P1 | WP12 | OpenAI and Ollama native calls; multiline text fallback | partial `4d06b4d`; no capability abstraction; no live model |
+| WP14 | Streaming and retry (6) | P1 | WP13 | No duplicate output; backoff, jitter, Retry-After | done `7d0f565` |
+| WP15 | Conversation concurrency (7) | P0 | WP12 | Events carry conversation and run IDs; race tests pass | done `20080e0` |
+| WP16 | MCP lifecycle (8) | P1 | WP12 | One shared process per server config; status and restart | done `dce421b`; no health ping |
+| WP17 | Context management (10) | P1 | WP13 | Whole turns trimmed; system prompt counted once | partial `92704f0`; no summarisation, strategies or provider token counting |
+| WP18 | Storage and backups (11) | P1 | WP15 | Metadata bucket, migration, consistent snapshots | partial `419b509` (backups); metadata, pagination, migrations todo |
 | WP19 | Usage and budgets (12) | P2 | WP18 | Real counts; no invented prices; limits | todo |
-| WP20 | Model discovery (13) | P2 | – | `/models` with static fallback and cache | todo |
+| WP20 | Model discovery (13) | P2 | – | `/models` with static fallback and cache | partial `4020b00` |
 | WP21 | Workspaces and profiles (14.1–2) | P2 | WP07 | | todo |
 | WP22 | Timeline, diff review, observability (14.3–5) | P2 | WP13 | | todo |
-| WP23 | Backend refactor (15) | P2 | WP15 | `app.go` split by responsibility | todo |
-| WP24 | Frontend refactor and tests (16, 17) | P2 | WP15 | `App.tsx` split; component tests | todo |
-| WP25 | Dependency upgrades (16) | P2 | WP24 | Audit clean; separate commits | todo |
-| WP26 | Documentation and final report (18–20) | P1 | all | Docs match behaviour; `IMPLEMENTATION_REPORT.md` | todo |
+| WP23 | Backend refactor (15) | P2 | WP15 | `app.go` split by responsibility | partial |
+| WP24 | Frontend refactor and tests (16, 17) | P2 | WP15 | `App.tsx` split; component tests | partial `426a634` (Vitest only) |
+| WP25 | Dependency upgrades (16) | P2 | WP24 | Audit clean; separate commits | partial `49ccfa8`; React 18 remains |
+| WP26 | Documentation and final report (18–20) | P1 | all | Docs match behaviour; `IMPLEMENTATION_REPORT.md` | done `f28ce11` and report |
 
 ## Decisions
 
@@ -76,4 +76,8 @@ Status: `todo`, `done`, `partial`, `blocked`. Priority P0 = security/data integr
 
 ## Next action
 
-WP14 (streaming and retry), then WP12, WP15, WP16, WP13.
+1. Push (needs the owner's authorization) and fix CI, especially Windows and macOS tests.
+2. Exercise native tool calling against a live model.
+3. WP18 (metadata bucket, versioned migration), then WP19, WP24, WP22, WP21.
+
+See `IMPLEMENTATION_REPORT.md`.
