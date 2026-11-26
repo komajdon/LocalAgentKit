@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	maxRetries  = 3
-	retryDelay  = 1 * time.Second
+	maxRetries = 3
+	retryDelay = 1 * time.Second
 )
 
 // isTransient returns true for errors that are worth retrying

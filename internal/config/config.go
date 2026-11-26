@@ -23,8 +23,8 @@ const (
 	ProviderSambaNova   ProviderType = "sambanova"
 	ProviderNvidia      ProviderType = "nvidia"
 	// No API key required
-	ProviderLLM7   ProviderType = "llm7"
-	ProviderZAI    ProviderType = "zai"
+	ProviderLLM7 ProviderType = "llm7"
+	ProviderZAI  ProviderType = "zai"
 	// GitHub personal access token (free with any GitHub account)
 	ProviderGitHub ProviderType = "github"
 )

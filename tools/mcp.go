@@ -344,9 +344,11 @@ type mcpTool struct {
 	client     *mcpClient
 }
 
-func (t *mcpTool) Name() string        { return t.serverName + "__" + t.def.Name }
-func (t *mcpTool) Description() string { return fmt.Sprintf("[MCP:%s] %s", t.serverName, t.def.Description) }
-func (t *mcpTool) Parameters() string  { return string(t.def.InputSchema) }
+func (t *mcpTool) Name() string { return t.serverName + "__" + t.def.Name }
+func (t *mcpTool) Description() string {
+	return fmt.Sprintf("[MCP:%s] %s", t.serverName, t.def.Description)
+}
+func (t *mcpTool) Parameters() string { return string(t.def.InputSchema) }
 
 func (t *mcpTool) Execute(args map[string]string) string {
 	anyArgs := make(map[string]any, len(args))
@@ -368,7 +370,7 @@ func (t *mcpTool) Execute(args map[string]string) string {
 // ── mcpPool holds all live MCP clients for shutdown ─────────────────────────
 
 var (
-	mcpPoolMu      sync.Mutex
+	mcpPoolMu        sync.Mutex
 	mcpActiveClients []*mcpClient
 )
 

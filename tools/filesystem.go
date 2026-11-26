@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	maxReadBytes   = 2 * 1024 * 1024  // 2 MB per file read
-	maxSearchBytes = 512 * 1024        // 512 KB per file during search
+	maxReadBytes   = 2 * 1024 * 1024 // 2 MB per file read
+	maxSearchBytes = 512 * 1024      // 512 KB per file during search
 	maxSearchHits  = 200
 )
 
@@ -49,8 +49,10 @@ func (t *readFileTool) Execute(args map[string]string) string {
 	return string(data)
 }
 
-func (t *writeFileTool) Name() string        { return "write_file" }
-func (t *writeFileTool) Description() string { return "Write content to a file (creates or overwrites)" }
+func (t *writeFileTool) Name() string { return "write_file" }
+func (t *writeFileTool) Description() string {
+	return "Write content to a file (creates or overwrites)"
+}
 func (t *writeFileTool) Parameters() string {
 	return `{"path": "file path", "content": "file content"}`
 }

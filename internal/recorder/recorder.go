@@ -76,9 +76,9 @@ func (s *Session) Stop() ([]byte, error) {
 func buildCmd(outFile string) (string, []string) {
 	if p, err := exec.LookPath("arecord"); err == nil {
 		return p, []string{
-			"-f", "S16_LE",  // 16-bit signed little-endian
-			"-r", "16000",   // 16 kHz
-			"-c", "1",       // mono
+			"-f", "S16_LE", // 16-bit signed little-endian
+			"-r", "16000", // 16 kHz
+			"-c", "1", // mono
 			"-t", "wav",
 			outFile,
 		}

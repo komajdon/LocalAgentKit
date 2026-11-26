@@ -4,15 +4,16 @@ package llm
 // free-tier cloud LLM provider. All listed providers expose an
 // OpenAI-compatible /v1/chat/completions endpoint.
 type FreeProviderInfo struct {
-	BaseURL    string
-	Models     []string
-	NoAPIKey   bool // true = works without an API key
+	BaseURL  string
+	Models   []string
+	NoAPIKey bool // true = works without an API key
 }
 
 // FreeProviderConfigs maps ProviderType string values to their API base URL
 // and a curated list of freely available models.
 // Sources: github.com/cheahjs/free-llm-api-resources (updated June 2026)
-//          github.com/mnfst/awesome-free-llm-apis
+//
+//	github.com/mnfst/awesome-free-llm-apis
 var FreeProviderConfigs = map[string]FreeProviderInfo{
 	"groq": {
 		BaseURL: "https://api.groq.com/openai/v1",

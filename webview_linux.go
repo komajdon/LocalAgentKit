@@ -51,5 +51,5 @@ import "C"
 // inside the embedded WebKit2GTK view. Call this from OnDomReady so the
 // WebView widget tree already exists.
 func EnableMediaAccess() {
-    C.EnableMediaAccess()
+	C.EnableMediaAccess()
 }
