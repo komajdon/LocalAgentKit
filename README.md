@@ -19,6 +19,10 @@ A local-first desktop AI agent with tool use, voice input, MCP support, and pers
 | **Permission system** | Per-tool allow / ask / deny; approvals once, per session or per workspace, revocable |
 | **Shell sandbox** | bubblewrap (Linux) or sandbox-exec (macOS); none on Windows — see [SECURITY.md](SECURITY.md) |
 | **Encrypted storage** | AES-256-GCM database; key in a file (portable) or the OS keychain; passphrase-encrypted backups |
+| **Agent profiles & workspaces** | Per-task instructions, tools and stricter permissions; ignore patterns per directory |
+| **File change review** | Diff before approval, conflict detection, undo, git status |
+| **Usage & limits** | Real token records, your own prices, per-run / daily / monthly limits |
+| **Tool timeline & diagnostics** | What ran, how it was approved, how long it took |
 | **Conversation history** | Full history with search, rename, and export (Markdown / plain text) |
 | **Per-conversation model** | Override the default LLM per conversation |
 | **Context management** | Live token counter; auto-trims oldest messages when approaching the limit |
@@ -148,6 +152,11 @@ All settings are in **⚙ Settings**. Everything is saved in an encrypted local 
 | Work Dir | _(home)_ | Directory the agent can access |
 | Whisper Model | `base` | `tiny` / `base` / `small` / `medium` / `large` |
 | Context Limit | `8192` | Size of the request window; older turns are left out of requests, never deleted |
+| Older turns | `sliding` | `sliding`, `hybrid` or `summary` |
+| Execution limits | 50 / 4 / 360 s | Model rounds, parallel tools and seconds per tool |
+| Automatic backups | `7` | How many to keep |
+| Per model | automatic | Context limit, tool calling and provider timeout (Settings) |
+| Prices and limits | none | 📊 Usage |
 | Tool calling | `auto` | Native function calling when the model supports it, or the text protocol |
 | Shell sandbox | `auto` | `auto`, `strict` (refuse without isolation) or `off` |
 | Sandbox network | off | Network access for sandboxed shell commands |
@@ -194,7 +203,7 @@ wails dev
 
 ```bash
 go test -race ./... && go vet ./... && golangci-lint run ./...
-cd frontend && npm test && npm run build
+cd frontend && npm run lint && npm test && npm run build
 ```
 
 `go build` and `go test` need no GTK headers; `wails build` does.

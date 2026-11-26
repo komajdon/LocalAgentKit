@@ -7,6 +7,7 @@ See `docs/UPGRADING.md` for behaviour changes and downgrade steps.
 ### Fixed — data loss
 - Trimming to the context limit permanently deleted old messages.
 - A damaged or unreadable key file was overwritten with a new key.
+- ChatGPT and Claude export files imported nothing.
 - Restoring a backup overwrote the open database.
 - Stopped, failed and interrupted turns were not saved.
 
@@ -30,6 +31,17 @@ See `docs/UPGRADING.md` for behaviour changes and downgrade steps.
 ### Added
 - Native function calling for Ollama and OpenAI-compatible providers.
 - Cancellation of running tools.
-- Live model discovery.
+- Live model discovery, capability detection, per-model overrides, connection test.
+- Agent profiles and named workspaces with ignore patterns.
+- File change review: diffs, conflict detection, undo, git status.
+- Usage records, prices and limits (replacing the budget widget).
+- Tool timeline, structured log, diagnostics export.
+- Context summarisation strategies.
+- Encryption key rotation; MCP health checks.
+- Conversation index with versioned migration.
 - MCP server status and restart.
-- Go and frontend tests, and CI quality gates.
+- Go and frontend tests, ESLint, and CI quality gates.
+
+### Changed
+- `app.go` and `App.tsx` split into smaller files.
+- React 19, Vite 6, TypeScript 6.

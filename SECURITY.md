@@ -14,6 +14,17 @@ Out of scope: malware already running as you, a compromised OS, a malicious MCP
 server you chose to install, and what a cloud model provider does with what you
 send it.
 
+## Threat model
+
+| Threat | Main controls | What remains |
+|---|---|---|
+| Injected instructions in web pages, documents or MCP output | Approval checks in code; blanket "allow" suspended for sensitive tools after external content; output framed as data | You can still approve a malicious request. Read-only tools can send file contents to the model |
+| The model damages files | Diff before approval, conflict detection, journal with undo | Shell and MCP changes are not journaled |
+| The model reaches outside the project | `os.Root` confinement, ignore patterns, shell sandbox | No sandbox on Windows; MCP servers unsandboxed; shell ignores ignore patterns |
+| Remote content runs in the app's window | No raw HTML, CSP, navigation and permission blocking | Windows and macOS web view behaviour untested |
+| Stolen data folder or backup | Encryption, keychain option, passphrase backups | The default key file sits beside the database |
+| Runaway cost | Round limit, repeat detection, token and cost limits | A request in flight can overshoot; cost limits depend on your prices |
+
 ## Permissions
 
 Every tool call is checked. Order: a global *deny*, a global *allow*, a stored
@@ -26,6 +37,20 @@ approval, otherwise you are asked.
 - Once a conversation contains web search results, document text or MCP output,
   *Always Allow* no longer covers sensitive tools.
 - Read-only tools can still send file contents to your model provider.
+- Profiles and workspaces can only make a permission stricter or remove a tool.
+
+## Workspace ignore patterns
+
+File and document tools cannot list or open matching paths, including through
+links. **Shell commands and MCP servers are not bound by them.** Git status in
+the review screen can show the names of ignored files.
+
+## File changes
+
+Writes and deletes made by the built-in tools are journaled in the encrypted
+database with the previous content (up to 1 MiB per file, 200 per
+conversation). That content can include secrets from your files. Deleting the
+conversation removes it. Undo refuses if the file changed since.
 
 The system prompt tells the model to treat tool output as data. That is a
 mitigation, not a boundary; the permission check is the boundary.
@@ -76,7 +101,9 @@ app's environment beyond `PATH` and `HOME`.
 - Exported backups are encrypted with Argon2id + AES-256-GCM under your
   passphrase. Automatic backups contain no key.
 - Backups made by earlier versions, and `pre-restore-*` folders, contain the key.
-- Key rotation is not implemented.
+- Key rotation re-encrypts everything (file key only). Automatic backups made
+  before a rotation can no longer be restored.
+- Upgrading copies the database to `data/backups/pre-migration-*.db`.
 
 ## Interface
 
@@ -97,7 +124,10 @@ print a secret into the conversation, which is then sent to the model.
 ## Other limits
 
 - The Whisper model download is not checksum-verified.
-- Conversation search and listing decrypt every conversation.
+- Message search decrypts conversations whose title and tags do not match.
+- `data/logs/app.log` is plain text. It holds names, timings, counts and error
+  categories, not prompts, arguments or results; retry errors may quote a
+  provider's message, after redaction.
 - There is no telemetry. The app contacts your model provider, your search
   provider, GitHub (update check) and Hugging Face (Whisper model).
 
