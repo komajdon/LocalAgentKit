@@ -32,7 +32,7 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
-		OnDomReady:       func(_ context.Context) { EnableMediaAccess() },
+		OnDomReady:       func(_ context.Context) { HardenWebView() },
 		Bind: []interface{}{
 			app,
 		},
