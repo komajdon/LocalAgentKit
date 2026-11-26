@@ -70,7 +70,7 @@ shell sandbox below.
 | Platform | Backend | Files readable | Files writable | Network |
 |---|---|---|---|---|
 | Linux | bubblewrap | system dirs (`/usr`, `/etc`, `/opt`, …) and the work directory | work directory, private `/tmp` | blocked unless enabled |
-| macOS | sandbox-exec | everything except your home outside the work directory | work directory, temp dirs | blocked unless enabled |
+| macOS | sandbox-exec | system paths and the work directory; not other home directories, volumes or temp dirs | work directory and a private temp dir | blocked unless enabled |
 | Windows | **none** | everything you can | everything you can | allowed |
 
 - *Automatic* runs unisolated when no backend works, and each result says so.
@@ -82,7 +82,9 @@ shell sandbox below.
   credential locations (`~/.ssh`, `~/.aws`, …) on Linux, but not every secret in
   your home. Prefer a project directory.
 - `/etc` is readable inside the Linux sandbox.
-- **The macOS profile has not been run on a Mac.**
+- On macOS and Linux, commands get a private `HOME` unless the work directory
+  contains your real one.
+- **The current macOS profile has not been run on a Mac.**
 - Container-based execution is not implemented.
 
 **MCP servers are not sandboxed.** They run as you. They do not inherit the

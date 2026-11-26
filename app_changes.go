@@ -160,11 +160,12 @@ func (a *App) GetGitStatus(conversationID string) GitStatus {
 		result.Error = err.Error()
 		return result
 	}
-	out := &sandbox.Output{Max: 64 * 1024}
-	cmd.Stdout, cmd.Stderr = out, out
+	// Warnings on stderr must not be mistaken for changed paths.
+	out, errOut := &sandbox.Output{Max: 64 * 1024}, &sandbox.Output{Max: 4 * 1024}
+	cmd.Stdout, cmd.Stderr = out, errOut
 	if err := cmd.Run(); err != nil {
-		if !strings.Contains(out.String(), "not a git repository") {
-			result.Error = strings.TrimSpace(out.String())
+		if !strings.Contains(errOut.String(), "not a git repository") {
+			result.Error = strings.TrimSpace(errOut.String())
 			if result.Error == "" {
 				result.Error = err.Error()
 			}

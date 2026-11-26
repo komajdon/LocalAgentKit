@@ -126,6 +126,15 @@ archive from `main` passed restore validation.
 
 Nothing else was measured.
 
+## CI results reported by the owner
+
+After the owner pushed the branch, the macOS test job failed twice: the sandbox
+profile left temporary directories readable and writable, and git could not run
+because the hidden home returned "operation not permitted". Both are fixed
+locally and covered by profile-rule tests that run on Linux. **The fixed profile
+is UNVERIFIED on macOS** until the job runs again. Results of the other jobs
+were not reported.
+
 ## UNVERIFIED
 
 - Remote CI, including the new Windows and macOS test jobs. Some tests assume
