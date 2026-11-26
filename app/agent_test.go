@@ -130,3 +130,18 @@ func TestChatPropagatesProviderErrorAndCancel(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestChatKeepsPartialReplyAndRunsNoToolFromIt(t *testing.T) {
+	tool := &testutil.FakeTool{ToolName: "echo"}
+	p := &testutil.FakeProvider{Replies: []testutil.Reply{{Chunks: []string{call("echo")}, Err: domain.ErrInterrupted}}}
+	a := newTestAgent(p, tool)
+	if err := a.Chat(context.Background(), "hi"); !errors.Is(err, domain.ErrInterrupted) {
+		t.Fatalf("err = %v", err)
+	}
+	if tool.Calls() != 0 {
+		t.Fatal("tool call from a partial reply ran")
+	}
+	if got := lastContent(a, 0); !strings.Contains(got, "echo") || !strings.HasSuffix(got, interruptedNote) {
+		t.Fatalf("history = %q", got)
+	}
+}

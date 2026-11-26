@@ -106,6 +106,9 @@ func (a *ConversationalAgent) TokenCount() int {
 
 const maxToolIterations = 50
 
+// interruptedNote ends a reply that was cut off.
+const interruptedNote = "[reply interrupted]"
+
 // Chat runs one user turn, including the tool-use loop.
 func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error {
 	a.conv.Add(domain.Message{Role: domain.RoleUser, Content: userInput})
@@ -127,6 +130,13 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			}
 		})
 		if err != nil {
+			// Keep what the user already saw, so history matches the screen.
+			// Tool calls in a partial reply are never run.
+			if response != "" {
+				a.recordUsage(usage)
+				a.conv.Add(domain.Message{Role: domain.RoleAssistant, Content: response + "\n\n" + interruptedNote})
+				a.emitContextUsage()
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}

@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"agent-gui/domain"
 	"agent-gui/internal/redact"
@@ -30,9 +29,10 @@ type ollamaChatResponse struct {
 	Message struct {
 		Content string `json:"content"`
 	} `json:"message"`
-	Done            bool `json:"done"`
-	PromptEvalCount int  `json:"prompt_eval_count"`
-	EvalCount       int  `json:"eval_count"`
+	Done            bool   `json:"done"`
+	PromptEvalCount int    `json:"prompt_eval_count"`
+	EvalCount       int    `json:"eval_count"`
+	Error           string `json:"error"`
 }
 
 // OllamaProvider talks to Ollama's native /api/chat endpoint.
@@ -44,7 +44,7 @@ type OllamaProvider struct {
 func NewOllamaProvider(host string) *OllamaProvider {
 	return &OllamaProvider{
 		host:   strings.TrimRight(host, "/"),
-		client: &http.Client{Timeout: 10 * time.Minute},
+		client: newHTTPClient(),
 	}
 }
 
@@ -53,9 +53,14 @@ func (p *OllamaProvider) ChatStream(ctx context.Context, model string, messages 
 		result string
 		usage  *domain.Usage
 	)
-	err := withRetry(ctx, func() error {
+	emitted := false
+	emit := func(chunk string) {
+		emitted = true
+		onChunk(chunk)
+	}
+	err := withRetry(ctx, func() bool { return emitted }, func() error {
 		var e error
-		result, usage, e = p.chatStream(ctx, model, messages, onChunk)
+		result, usage, e = p.chatStream(ctx, model, messages, emit)
 		return e
 	})
 	// A base URL may carry a password.
@@ -89,13 +94,15 @@ func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages 
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return "", nil, fmt.Errorf("ollama error %d: %s", resp.StatusCode, string(b))
+		return "", nil, newHTTPError("ollama", resp)
 	}
 
 	var full strings.Builder
 	var usage *domain.Usage
-	scanner := bufio.NewScanner(resp.Body)
+	finished := false
+	stream := newIdleReader(resp.Body)
+	defer stream.stop()
+	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 1024*1024), 8*1024*1024) // 8 MB max token
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -105,6 +112,9 @@ func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages 
 		var cr ollamaChatResponse
 		if err := json.Unmarshal(line, &cr); err != nil {
 			continue
+		}
+		if cr.Error != "" {
+			return full.String(), usage, interrupted(ctx, fmt.Errorf("ollama: %s", cr.Error))
 		}
 		if cr.Message.Content != "" {
 			full.WriteString(cr.Message.Content)
@@ -119,10 +129,14 @@ func (p *OllamaProvider) chatStream(ctx context.Context, model string, messages 
 					TotalTokens:      cr.PromptEvalCount + cr.EvalCount,
 				}
 			}
+			finished = true
 			break
 		}
 	}
-	return full.String(), usage, scanner.Err()
+	if !finished {
+		return full.String(), usage, interrupted(ctx, scanner.Err())
+	}
+	return full.String(), usage, nil
 }
 
 func (p *OllamaProvider) ListModels() ([]string, error) {
@@ -131,7 +145,13 @@ func (p *OllamaProvider) ListModels() ([]string, error) {
 }
 
 func (p *OllamaProvider) listModels() ([]string, error) {
-	resp, err := p.client.Get(p.host + "/api/tags")
+	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.host+"/api/tags", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("connection failed: %w", err)
 	}

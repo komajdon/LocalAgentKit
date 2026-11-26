@@ -1,6 +1,13 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrInterrupted reports a reply that stopped before the provider finished it.
+// ChatStream returns the text received so far along with it.
+var ErrInterrupted = errors.New("the model's reply was interrupted")
 
 // Usage reports token counts returned by the provider for one completion.
 type Usage struct {
