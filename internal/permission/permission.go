@@ -149,12 +149,15 @@ func NewManager(store Persistence) (*Manager, error) {
 	return m, err
 }
 
-// Check decides a call given the global setting for the tool.
-func (m *Manager) Check(setting, workspace, tool string, args map[string]string) Decision {
-	switch setting {
-	case SettingDeny:
+// Check decides a call given the global setting for the tool. When
+// externalContent is true the conversation holds text someone else may have
+// written, so a blanket "allow" no longer covers sensitive tools; they need an
+// approval of the exact call.
+func (m *Manager) Check(setting, workspace, tool string, args map[string]string, externalContent bool) Decision {
+	switch {
+	case setting == SettingDeny:
 		return Deny
-	case SettingAllow:
+	case setting == SettingAllow && (readOnly[tool] || !externalContent):
 		return Allow
 	}
 	m.mu.Lock()

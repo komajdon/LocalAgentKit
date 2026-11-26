@@ -34,7 +34,7 @@ func TestGrantStoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, err := permission.NewManager(grantStore{})
-	if err != nil || again.Check("", "/w", "shell", args) != permission.Allow {
+	if err != nil || again.Check("", "/w", "shell", args, false) != permission.Allow {
 		t.Fatalf("grant not persisted: %v", err)
 	}
 	if err := again.RevokeAll(); err != nil {

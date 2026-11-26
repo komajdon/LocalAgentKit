@@ -58,7 +58,7 @@ func (a *App) authorize(workspace string, req appLayer.PermissionRequest) bool {
 	setting := string(a.cfg.ToolPermissions[req.Tool])
 	a.mu.Unlock()
 
-	switch a.permissions.Check(setting, workspace, req.Tool, req.Args) {
+	switch a.permissions.Check(setting, workspace, req.Tool, req.Args, req.ExternalContent) {
 	case permission.Allow:
 		runtime.EventsEmit(a.ctx, "chat:tool_auto_allowed", req.Tool)
 		return true
@@ -70,6 +70,10 @@ func (a *App) authorize(workspace string, req appLayer.PermissionRequest) bool {
 	details := permission.Describe(req.Tool, req.Args)
 	if req.Tool == "shell" {
 		details.Impact += " Current " + sandbox.Probe(a.sandboxOptions()).String() + "."
+	}
+
+	if req.ExternalContent && details.Sensitive {
+		details.Impact += " This conversation contains web, document or MCP content, which can carry injected instructions: check the request is what you intended."
 	}
 
 	a.mu.Lock()
