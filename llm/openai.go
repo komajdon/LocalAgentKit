@@ -243,13 +243,13 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 }
 
 func (p *OpenAIProvider) ListModels() ([]string, error) {
-	names, err := p.listModels()
+	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
+	defer cancel()
+	names, err := p.listModels(ctx)
 	return names, redact.Error(err, p.apiKey)
 }
 
-func (p *OpenAIProvider) listModels() ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
-	defer cancel()
+func (p *OpenAIProvider) listModels(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)

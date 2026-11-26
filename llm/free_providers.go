@@ -1,5 +1,13 @@
 package llm
 
+import (
+	"context"
+	"time"
+)
+
+// discoveryTimeout keeps Settings responsive when a service is unreachable.
+const discoveryTimeout = 8 * time.Second
+
 // FreeProviderInfo holds the hardcoded base URL and available model list for a
 // free-tier cloud LLM provider. All listed providers expose an
 // OpenAI-compatible /v1/chat/completions endpoint.
@@ -186,8 +194,8 @@ var FreeProviderConfigs = map[string]FreeProviderInfo{
 	},
 }
 
-// FreeProvider wraps OpenAIProvider with a hardcoded model list so users
-// immediately see available models without requiring a live API call.
+// FreeProvider is an OpenAIProvider with a built-in model list to fall back on
+// when the service cannot be asked, for example before an API key is entered.
 type FreeProvider struct {
 	*OpenAIProvider
 	models []string
@@ -200,6 +208,13 @@ func NewFreeProvider(baseURL, apiKey string, models []string) *FreeProvider {
 	}
 }
 
+// ListModels asks the service which models it has now; built-in lists go out
+// of date. The list is returned instead if that fails or comes back empty.
 func (p *FreeProvider) ListModels() ([]string, error) {
-	return p.models, nil
+	ctx, cancel := context.WithTimeout(context.Background(), discoveryTimeout)
+	defer cancel()
+	if live, err := p.listModels(ctx); err == nil && len(live) > 0 {
+		return live, nil
+	}
+	return append([]string(nil), p.models...), nil
 }
