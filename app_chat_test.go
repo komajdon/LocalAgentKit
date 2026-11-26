@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -381,5 +382,25 @@ func TestConcurrentAccessIsRaceFree(t *testing.T) {
 	wait(t, r.done)
 	if got := stored(t, id); len(got.Tags) != 1 || len(got.Messages) < 2 {
 		t.Fatalf("tags=%v messages=%d", got.Tags, len(got.Messages))
+	}
+}
+
+func TestNativeToolHistorySurvivesStorage(t *testing.T) {
+	a, _ := testApp(t, &scripted{})
+	id := newConv(t, a)
+	args := domain.Args{"n": json.Number("9007199254740993")}
+	err := a.updateConversation(id, func(c *history.Conversation) error {
+		c.Messages = []history.SavedMessage{
+			history.Saved(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "1", Tool: "t", Args: args}}}),
+			history.Saved(domain.Message{Role: domain.RoleTool, ToolCallID: "1", ToolName: "t", Content: "r"}),
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := stored(t, id).Messages
+	if got[0].Message().ToolCalls[0].Args.String("n") != "9007199254740993" || got[1].Message().ToolName != "t" {
+		t.Fatalf("stored = %+v", got)
 	}
 }

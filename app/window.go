@@ -73,7 +73,8 @@ func (a *ConversationalAgent) window() []domain.Message {
 	}
 	// The newest message is what the model must respond to, so it stays whole.
 	for i := 0; i < len(last)-1 && used > budget; i++ {
-		if last[i].Role != domain.RoleUser || startsTurn(last[i]) || len(last[i].Content) < 400 {
+		isResult := last[i].Role == domain.RoleTool || (last[i].Role == domain.RoleUser && !startsTurn(last[i]))
+		if !isResult || len(last[i].Content) < 400 {
 			continue
 		}
 		head, _, _ := strings.Cut(last[i].Content, ":\n")

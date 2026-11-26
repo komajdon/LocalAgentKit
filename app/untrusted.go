@@ -57,6 +57,9 @@ func sourceOf(tool string, args domain.Args) string {
 // external source. It is derived from the history so it survives a reload.
 func hasExternalContent(msgs []domain.Message) bool {
 	for _, m := range msgs {
+		if m.Role == domain.RoleTool && isExternalSource(m.ToolName) {
+			return true
+		}
 		rest, ok := strings.CutPrefix(m.Content, toolResultPrefix)
 		if !ok || m.Role != domain.RoleUser {
 			continue

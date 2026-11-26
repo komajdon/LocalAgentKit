@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-gui/domain"
 	"agent-gui/internal/store"
 )
 
@@ -23,8 +24,23 @@ type ConvMeta struct {
 }
 
 type SavedMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	ToolCalls  []domain.ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	ToolName   string            `json:"tool_name,omitempty"`
+}
+
+// Message converts to the agent's form.
+func (m SavedMessage) Message() domain.Message {
+	return domain.Message{Role: domain.Role(m.Role), Content: m.Content,
+		ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID, ToolName: m.ToolName}
+}
+
+// Saved converts an agent message to its stored form.
+func Saved(m domain.Message) SavedMessage {
+	return SavedMessage{Role: string(m.Role), Content: m.Content,
+		ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID, ToolName: m.ToolName}
 }
 
 // TokenUsage stores cumulative real token counts for a conversation.

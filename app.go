@@ -157,7 +157,7 @@ func (a *App) BranchConversation(id string, displayItemIndex int) (*history.Conv
 			continue
 		}
 		// Older transcripts stored replies that were only tool calls.
-		if t, _ := it.Data["text"].(string); role == "assistant" && stripToolCalls(t) == "" && i != displayItemIndex {
+		if t, _ := it.Data["text"].(string); role == "assistant" && domain.StripToolCalls(t) == "" && i != displayItemIndex {
 			continue
 		}
 		if i == displayItemIndex {

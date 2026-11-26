@@ -23,3 +23,27 @@ type LLMProvider interface {
 	ChatStream(ctx context.Context, model string, messages []Message, onChunk func(string)) (string, *Usage, error)
 	ListModels() ([]string, error)
 }
+
+// ToolSpec describes a tool to a provider with native tool calling.
+type ToolSpec struct {
+	Name        string
+	Description string
+	Parameters  []byte // JSON schema
+}
+
+// Reply is a model response that may request tool calls.
+type Reply struct {
+	Content   string
+	ToolCalls []ToolCall
+}
+
+// ToolCallingProvider is a provider with native tool calling. It returns
+// ErrToolsUnsupported when the server or model rejects the tools, before any
+// output, so the caller can fall back to the text protocol.
+type ToolCallingProvider interface {
+	LLMProvider
+	ChatTools(ctx context.Context, model string, messages []Message, tools []ToolSpec, onChunk func(string)) (Reply, *Usage, error)
+}
+
+// ErrToolsUnsupported reports that native tool calling is not available.
+var ErrToolsUnsupported = errors.New("this model does not support native tool calling")

@@ -72,6 +72,8 @@ type Config struct {
 	SandboxMode string `json:"sandbox_mode"`
 	// SandboxNetwork lets isolated shell commands use the network.
 	SandboxNetwork bool `json:"sandbox_network"`
+	// ToolCalling: auto (native when the model supports it) | text.
+	ToolCalling string `json:"tool_calling"`
 }
 
 func Default() Config {
@@ -90,6 +92,7 @@ func Default() Config {
 		BudgetFund:      50,
 		FundPerMTokens:  1,
 		SandboxMode:     "auto",
+		ToolCalling:     "auto",
 	}
 }
 

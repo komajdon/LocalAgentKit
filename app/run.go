@@ -49,17 +49,13 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			return ctx.Err()
 		}
 
-		response, usage, err := a.provider.ChatStream(ctx, a.model, a.window(), func(chunk string) {
-			if a.OnChunk != nil {
-				a.OnChunk(chunk)
-			}
-		})
+		reply, usage, err := a.request(ctx)
 		if err != nil {
 			// Keep what the user already saw, so history matches the screen.
 			// Tool calls in a partial reply are never run.
-			if response != "" {
+			if reply.Content != "" {
 				a.recordUsage(usage)
-				a.addAssistant(response + "\n\n" + InterruptedNote)
+				a.addAssistant(reply.Content + "\n\n" + InterruptedNote)
 				a.emitContextUsage()
 			}
 			if ctx.Err() != nil {
@@ -69,10 +65,17 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 		}
 		a.recordUsage(usage)
 
-		a.addAssistant(response)
+		a.addAssistant(reply.Content, reply.ToolCalls...)
 		a.emitContextUsage()
 
-		pending := a.collectCalls(ctx, response)
+		calls := reply.ToolCalls
+		if !a.native {
+			calls = nil
+			for _, p := range domain.ParseToolCalls(reply.Content) {
+				calls = append(calls, p.Call)
+			}
+		}
+		pending := a.collectCalls(ctx, calls)
 		if len(pending) == 0 {
 			return nil
 		}
@@ -97,7 +100,12 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			if a.OnToolResult != nil {
 				a.OnToolResult(p.tc.Tool, p.result)
 			}
-			a.conv.Add(domain.Message{Role: domain.RoleUser, Content: frameToolResult(p.tc.Tool, sourceOf(p.tc.Tool, p.tc.Args), p.result)})
+			content := frameToolResult(p.tc.Tool, sourceOf(p.tc.Tool, p.tc.Args), p.result)
+			if a.native {
+				a.conv.Add(domain.Message{Role: domain.RoleTool, Content: content, ToolCallID: p.tc.ID, ToolName: p.tc.Tool})
+			} else {
+				a.conv.Add(domain.Message{Role: domain.RoleUser, Content: content})
+			}
 		}
 		if repeats >= maxRepeats {
 			return ErrRepeatedCall
@@ -106,15 +114,67 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 	return fmt.Errorf("%w (%d)", ErrIterationLimit, maxToolIterations)
 }
 
-// collectCalls parses every tool call in a reply. Permission prompts happen
-// here, one at a time, so the UI only ever shows one dialog.
-func (a *ConversationalAgent) collectCalls(ctx context.Context, response string) []*pendingCall {
-	var pending []*pendingCall
-	for _, line := range strings.Split(response, "\n") {
-		tc, ok := domain.ParseToolCall(line)
-		if !ok {
-			continue
+// request asks the model for its next reply, natively when possible. A model
+// that rejects tools is served with the text protocol from then on.
+func (a *ConversationalAgent) request(ctx context.Context) (domain.Reply, *domain.Usage, error) {
+	onChunk := func(chunk string) {
+		if a.OnChunk != nil {
+			a.OnChunk(chunk)
 		}
+	}
+	if p, ok := a.provider.(domain.ToolCallingProvider); ok && a.native {
+		reply, usage, err := p.ChatTools(ctx, a.model, a.window(), a.toolSpecs(), onChunk)
+		if !errors.Is(err, domain.ErrToolsUnsupported) {
+			return reply, usage, err
+		}
+		a.useNativeTools(false)
+	}
+	msgs := a.window()
+	if !a.native {
+		msgs = asText(msgs)
+	}
+	content, usage, err := a.provider.ChatStream(ctx, a.model, msgs, onChunk)
+	return domain.Reply{Content: content}, usage, err
+}
+
+func (a *ConversationalAgent) toolSpecs() []domain.ToolSpec {
+	var specs []domain.ToolSpec
+	for _, t := range a.registry.All() {
+		specs = append(specs, domain.ToolSpec{Name: t.Name(), Description: t.Description(), Parameters: domain.SchemaOf(t)})
+	}
+	return specs
+}
+
+// asText rewrites native calls and results in the history into the text
+// protocol, for a model that does not take them natively.
+func asText(msgs []domain.Message) []domain.Message {
+	out := make([]domain.Message, 0, len(msgs))
+	for _, m := range msgs {
+		switch {
+		case m.Role == domain.RoleTool:
+			out = append(out, domain.Message{Role: domain.RoleUser, Content: m.Content})
+		case len(m.ToolCalls) > 0:
+			lines := []string{m.Content}
+			for _, c := range m.ToolCalls {
+				// Arguments came from JSON, so marshalling cannot fail.
+				data, _ := json.Marshal(domain.ToolCall{Tool: c.Tool, Args: c.Args})
+				lines = append(lines, "TOOL_CALL: "+string(data))
+			}
+			out = append(out, domain.Message{Role: m.Role, Content: strings.TrimSpace(strings.Join(lines, "\n"))})
+		default:
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// collectCalls validates each call and asks permission. Prompts happen here,
+// one at a time, so the UI only ever shows one dialog. Every call gets an
+// entry, so every call gets a result.
+func (a *ConversationalAgent) collectCalls(ctx context.Context, calls []domain.ToolCall) []*pendingCall {
+	var pending []*pendingCall
+	for _, call := range calls {
+		tc := &call
 		p := &pendingCall{tc: tc}
 		pending = append(pending, p)
 
@@ -122,11 +182,25 @@ func (a *ConversationalAgent) collectCalls(ctx context.Context, response string)
 			p.result = canceledResult
 			continue
 		}
+		if tc.Malformed != "" {
+			if tc.Tool == "" {
+				tc.Tool = "unknown"
+			}
+			p.result = "ERROR: malformed tool call, not run: " + tc.Malformed
+			continue
+		}
 		tool, found := a.registry.Find(tc.Tool)
 		if !found {
 			p.result = "ERROR: unknown tool '" + tc.Tool + "'"
 			continue
 		}
+		// Validated before the prompt, so what is approved is what runs.
+		args, err := domain.ValidateArgs(domain.SchemaOf(tool), tc.Args)
+		if err != nil {
+			p.result = "ERROR: " + err.Error()
+			continue
+		}
+		tc.Args = args
 		if a.OnPermissionRequest != nil {
 			allowed := a.OnPermissionRequest(PermissionRequest{
 				Tool:            tc.Tool,
@@ -183,9 +257,10 @@ func (a *ConversationalAgent) execute(ctx context.Context, pending []*pendingCal
 }
 
 func signatureOf(pending []*pendingCall) string {
-	calls := make([]*domain.ToolCall, len(pending))
+	calls := make([]domain.ToolCall, len(pending))
 	for i, p := range pending {
-		calls[i] = p.tc
+		calls[i] = *p.tc
+		calls[i].ID = "" // differs every time
 	}
 	// Arguments came from JSON, so marshalling them cannot fail.
 	data, _ := json.Marshal(calls)

@@ -67,10 +67,13 @@ type Tool interface {
 	Execute(ctx context.Context, args Args) string
 }
 
-// ToolCall is parsed from an LLM response.
+// ToolCall is a request from the model to run a tool.
 type ToolCall struct {
+	ID   string `json:"id,omitempty"`
 	Tool string `json:"tool"`
 	Args Args   `json:"args"`
+	// Malformed explains why the call could not be read. It is not run.
+	Malformed string `json:"malformed,omitempty"`
 }
 
 // ToolRegistry maps tool names to implementations.
@@ -101,18 +104,69 @@ func (r *ToolRegistry) All() []Tool {
 	return out
 }
 
-// ParseToolCall extracts a ToolCall from a line of LLM output.
-func ParseToolCall(line string) (*ToolCall, bool) {
-	const prefix = "TOOL_CALL:"
-	idx := strings.Index(line, prefix)
-	if idx == -1 {
-		return nil, false
+const callPrefix = "TOOL_CALL:"
+
+// ParsedCall is a tool call found in reply text, with the byte range it used.
+type ParsedCall struct {
+	Call       ToolCall
+	Start, End int
+}
+
+// ParseToolCalls finds the text-protocol calls in a reply. The JSON may span
+// several lines. A line that starts with the prefix but does not hold a valid
+// call yields a Malformed entry, so it is reported instead of ignored.
+func ParseToolCalls(text string) []ParsedCall {
+	var out []ParsedCall
+	for pos := 0; pos < len(text); {
+		i := strings.Index(text[pos:], callPrefix)
+		if i < 0 {
+			break
+		}
+		start := pos + i
+		body := start + len(callPrefix)
+		lineStart := strings.LastIndexByte(text[:start], '\n') + 1
+		atLineStart := strings.TrimSpace(text[lineStart:start]) == ""
+
+		var tc ToolCall
+		dec := json.NewDecoder(strings.NewReader(text[body:]))
+		dec.UseNumber()
+		err := dec.Decode(&tc)
+		if err == nil && tc.Tool == "" {
+			err = fmt.Errorf(`the "tool" field is missing`)
+		}
+		end := body + int(dec.InputOffset())
+		if err != nil {
+			end = len(text)
+			if nl := strings.IndexByte(text[body:], '\n'); nl >= 0 {
+				end = body + nl
+			}
+			// Prose that merely mentions the prefix is not a call.
+			if atLineStart {
+				out = append(out, ParsedCall{ToolCall{Malformed: err.Error()}, start, end})
+			}
+			pos = end
+			continue
+		}
+		tc.ID, tc.Malformed = "", ""
+		if atLineStart {
+			start = lineStart
+		}
+		out = append(out, ParsedCall{tc, start, end})
+		pos = end
 	}
-	var tc ToolCall
-	if err := DecodeJSON([]byte(strings.TrimSpace(line[idx+len(prefix):])), &tc); err != nil {
-		return nil, false
+	return out
+}
+
+// StripToolCalls removes the calls from reply text.
+func StripToolCalls(text string) string {
+	var b strings.Builder
+	last := 0
+	for _, p := range ParseToolCalls(text) {
+		b.WriteString(text[last:p.Start])
+		last = p.End
 	}
-	return &tc, true
+	b.WriteString(text[last:])
+	return strings.TrimSpace(b.String())
 }
 
 // DecodeJSON unmarshals exactly one JSON value, keeping numbers exact.
@@ -123,4 +177,17 @@ func DecodeJSON(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	return dec.Decode(v)
+}
+
+// UnmarshalJSON keeps numbers exact wherever arguments are read, including
+// from stored history.
+func (a *Args) UnmarshalJSON(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var m map[string]any
+	if err := dec.Decode(&m); err != nil {
+		return err
+	}
+	*a = m
+	return nil
 }

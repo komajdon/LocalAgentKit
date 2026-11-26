@@ -18,8 +18,21 @@ import (
 )
 
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+}
+
+// openAIToolCall is a call in a request, or a fragment of one in a stream.
+type openAIToolCall struct {
+	Index    *int   `json:"index,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Function struct {
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type openAIStreamOptions struct {
@@ -31,6 +44,7 @@ type openAIChatRequest struct {
 	Messages      []openAIMessage      `json:"messages"`
 	Stream        bool                 `json:"stream"`
 	StreamOptions *openAIStreamOptions `json:"stream_options,omitempty"`
+	Tools         []wireTool           `json:"tools,omitempty"`
 }
 
 type openAIUsage struct {
@@ -41,7 +55,8 @@ type openAIUsage struct {
 
 type openAIChoice struct {
 	Delta struct {
-		Content string `json:"content"`
+		Content   string           `json:"content"`
+		ToolCalls []openAIToolCall `json:"tool_calls"`
 	} `json:"delta"`
 	Message struct {
 		Content string `json:"content"`
@@ -74,9 +89,15 @@ func NewOpenAIProvider(baseURL, apiKey string) *OpenAIProvider {
 }
 
 func (p *OpenAIProvider) ChatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, *domain.Usage, error) {
+	reply, usage, err := p.ChatTools(ctx, model, messages, nil, onChunk)
+	return reply.Content, usage, err
+}
+
+// ChatTools streams a reply, offering the tools for native calling.
+func (p *OpenAIProvider) ChatTools(ctx context.Context, model string, messages []domain.Message, specs []domain.ToolSpec, onChunk func(string)) (domain.Reply, *domain.Usage, error) {
 	var (
-		result string
-		usage  *domain.Usage
+		reply domain.Reply
+		usage *domain.Usage
 	)
 	emitted := false
 	emit := func(chunk string) {
@@ -85,17 +106,24 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, model string, messages 
 	}
 	err := withRetry(ctx, func() bool { return emitted }, func() error {
 		var e error
-		result, usage, e = p.chatStream(ctx, model, messages, emit)
+		reply, usage, e = p.chatStream(ctx, model, messages, specs, emit)
 		return e
 	})
 	// Provider replies and URLs can echo credentials.
-	return result, usage, redact.Error(err, p.apiKey)
+	return reply, usage, redact.Error(toolRejection(err, len(specs) > 0), p.apiKey)
 }
 
-func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages []domain.Message, onChunk func(string)) (string, *domain.Usage, error) {
+func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages []domain.Message, specs []domain.ToolSpec, onChunk func(string)) (domain.Reply, *domain.Usage, error) {
+	tools, names := buildTools(specs)
 	msgs := make([]openAIMessage, len(messages))
 	for i, m := range messages {
-		msgs[i] = openAIMessage{Role: string(m.Role), Content: m.Content}
+		msgs[i] = openAIMessage{Role: string(m.Role), Content: m.Content, ToolCallID: m.ToolCallID}
+		for _, c := range m.ToolCalls {
+			tc := openAIToolCall{ID: c.ID, Type: "function"}
+			tc.Function.Name = names.toWire(c.Tool)
+			tc.Function.Arguments = string(encodeArguments(c.Args))
+			msgs[i].ToolCalls = append(msgs[i].ToolCalls, tc)
+		}
 	}
 
 	body, err := json.Marshal(openAIChatRequest{
@@ -103,14 +131,15 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 		Messages:      msgs,
 		Stream:        true,
 		StreamOptions: &openAIStreamOptions{IncludeUsage: true},
+		Tools:         tools,
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("marshal request: %w", err)
+		return domain.Reply{}, nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", nil, err
+		return domain.Reply{}, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if p.apiKey != "" {
@@ -119,16 +148,40 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", nil, fmt.Errorf("connection failed: %w", err)
+		return domain.Reply{}, nil, fmt.Errorf("connection failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, newHTTPError("API", resp)
+		return domain.Reply{}, nil, newHTTPError("API", resp)
 	}
 
 	var full strings.Builder
 	var usage *domain.Usage
+	// Call fragments are assembled by index; the arguments arrive in pieces.
+	var calls []*openAIToolCall
+	byIndex := map[int]*openAIToolCall{}
+	collect := func(fragment openAIToolCall) {
+		index := len(calls)
+		if fragment.Index != nil {
+			index = *fragment.Index
+		} else if fragment.ID == "" && len(calls) > 0 {
+			index = len(calls) - 1
+		}
+		call, ok := byIndex[index]
+		if !ok {
+			call = &openAIToolCall{}
+			byIndex[index] = call
+			calls = append(calls, call)
+		}
+		if fragment.ID != "" {
+			call.ID = fragment.ID
+		}
+		if fragment.Function.Name != "" {
+			call.Function.Name = fragment.Function.Name
+		}
+		call.Function.Arguments += fragment.Function.Arguments
+	}
 	finished := false
 	stream := newIdleReader(resp.Body)
 	defer stream.stop()
@@ -156,7 +209,7 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 			}
 		}
 		if chunk.Error != nil {
-			return full.String(), usage, interrupted(ctx, fmt.Errorf("provider error: %s", chunk.Error.Message))
+			return domain.Reply{Content: full.String()}, usage, interrupted(ctx, fmt.Errorf("provider error: %s", chunk.Error.Message))
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -165,6 +218,9 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 		if chunk.Choices[0].FinishReason != nil && *chunk.Choices[0].FinishReason != "" {
 			finished = true
 		}
+		for _, fragment := range chunk.Choices[0].Delta.ToolCalls {
+			collect(fragment)
+		}
 		text := chunk.Choices[0].Delta.Content
 		if text != "" {
 			full.WriteString(text)
@@ -172,9 +228,18 @@ func (p *OpenAIProvider) chatStream(ctx context.Context, model string, messages 
 		}
 	}
 	if !finished {
-		return full.String(), usage, interrupted(ctx, scanner.Err())
+		return domain.Reply{Content: full.String()}, usage, interrupted(ctx, scanner.Err())
 	}
-	return full.String(), usage, nil
+	reply := domain.Reply{Content: full.String()}
+	for _, c := range calls {
+		call := domain.ToolCall{ID: c.ID, Tool: names.toReal(c.Function.Name)}
+		if call.ID == "" {
+			call.ID = newCallID()
+		}
+		parseArguments(&call, c.Function.Arguments)
+		reply.ToolCalls = append(reply.ToolCalls, call)
+	}
+	return reply, usage, nil
 }
 
 func (p *OpenAIProvider) ListModels() ([]string, error) {

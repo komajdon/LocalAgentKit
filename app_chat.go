@@ -95,23 +95,11 @@ func (a *App) emitRun(r *run, name string, data any, record func()) {
 	a.emit(name, ev)
 }
 
-// stripToolCalls removes the text protocol's call lines from a reply.
-func stripToolCalls(text string) string {
-	lines := strings.Split(text, "\n")
-	kept := lines[:0]
-	for _, l := range lines {
-		if _, ok := domain.ParseToolCall(l); !ok || !strings.HasPrefix(strings.TrimSpace(l), "TOOL_CALL:") {
-			kept = append(kept, l)
-		}
-	}
-	return strings.TrimSpace(strings.Join(kept, "\n"))
-}
-
 // visibleReply is what the transcript shows for an assistant message: no tool
 // call lines, and no interruption marker, which has its own status row. A
 // message with nothing visible gets no transcript item.
 func visibleReply(content string) string {
-	return stripToolCalls(strings.TrimSuffix(content, appLayer.InterruptedNote))
+	return domain.StripToolCalls(strings.TrimSuffix(content, appLayer.InterruptedNote))
 }
 
 // agentFor builds an agent for one conversation from a configuration snapshot.
@@ -122,7 +110,10 @@ func (a *App) agentFor(cfg configSnapshot, conv *history.Conversation, registry 
 	}
 	agent := appLayer.NewConversationalAgent(model, a.providerFor(cfg), registry, cfg.SystemPrompt, cfg.ContextLimit)
 	for _, m := range conv.Messages {
-		agent.InjectMessage(domain.Role(m.Role), m.Content)
+		agent.Inject(m.Message())
+	}
+	if cfg.ToolCalling == "text" {
+		agent.UseTextTools()
 	}
 	agent.SetUsage(conv.TokenUsage.PromptTokens, conv.TokenUsage.CompletionTokens)
 	return agent
@@ -218,12 +209,14 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 		a.emitRun(r, "chat:chunk", chunk, func() { r.streaming.WriteString(chunk) })
 	}
 	agent.OnAssistantMessage = func(content string) {
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		r.streaming.Reset()
-		if visible := visibleReply(content); visible != "" {
-			r.turn = append(r.turn, msgItem("assistant", visible, false))
-		}
+		visible := visibleReply(content)
+		// Replaces the streamed text, which may include tool call lines.
+		a.emitRun(r, "chat:assistant", visible, func() {
+			r.streaming.Reset()
+			if visible != "" {
+				r.turn = append(r.turn, msgItem("assistant", visible, false))
+			}
+		})
 	}
 	agent.OnToolCall = func(name string, args domain.Args) {
 		body := args.Format()
@@ -283,7 +276,7 @@ func (a *App) finishRun(r *run, agent *appLayer.ConversationalAgent, runErr erro
 		msgs := agent.Messages()
 		conv.Messages = make([]history.SavedMessage, len(msgs))
 		for i, m := range msgs {
-			conv.Messages[i] = history.SavedMessage{Role: string(m.Role), Content: m.Content}
+			conv.Messages[i] = history.Saved(m)
 		}
 		if conv.Title == "New conversation" {
 			conv.Title = titleFrom(msgs)

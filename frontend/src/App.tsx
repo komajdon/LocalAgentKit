@@ -45,7 +45,7 @@ type Item =
   | { type: 'status'; id: number; text: string }
 
 interface ChatEvent { conversation_id: string; run_id: string; seq: number; data: any }
-const CHAT_EVENTS = ['started', 'thinking', 'chunk', 'tool_call', 'tool_result', 'context_usage', 'done', 'stopped', 'error']
+const CHAT_EVENTS = ['started', 'thinking', 'chunk', 'assistant', 'tool_call', 'tool_result', 'context_usage', 'done', 'stopped', 'error']
 const FINAL_EVENTS = ['done', 'stopped', 'error']
 
 // Stored transcript items keep their text under data; the view does not for
@@ -76,6 +76,7 @@ interface Cfg {
   notifications: boolean
   search_provider: string
   sandbox_mode: string
+  tool_calling: string
   sandbox_network: boolean
   search_api_key: string
   theme: string
@@ -230,7 +231,7 @@ export default function App() {
     mcp_servers: [], notifications: true,
     search_provider: 'duckduckgo', search_api_key: '',
     theme: 'dark',
-    sandbox_mode: 'auto', sandbox_network: false,
+    sandbox_mode: 'auto', sandbox_network: false, tool_calling: 'auto',
     budget_data_gb: 50, budget_fund: 50, fund_per_mtokens: 1,
   })
 
@@ -447,27 +448,22 @@ export default function App() {
       setItems(prev => [...prev, { type: 'error', id: uid(), text: msg }])
     })
 
-    handlers['tool_call'] = ((d: { tool: string; args: string }) => {
+    // The finished reply replaces the streamed text, which may hold tool calls.
+    handlers['assistant'] = (text: string) => {
       const sid = streamIdRef.current
       streamIdRef.current = null
-      const toolId = uid() // allocate outside setState — never call uid() inside an updater
       setItems(prev => {
-        let next = prev
-        if (sid !== null) {
-          next = prev.map(it => {
-            if (it.type !== 'msg' || it.data.id !== sid) return it
-            const cleaned = it.data.text
-              .split('\n')
-              .filter(l => !l.trimStart().startsWith('TOOL_CALL:'))
-              .join('\n')
-              .trim()
-            if (!cleaned) return null as any
-            return { ...it, data: { ...it.data, text: cleaned, streaming: false } }
-          }).filter(Boolean)
-        }
-        return [...next, { type: 'tool', data: { id: toolId, kind: 'call', tool: d.tool, body: d.args } }]
+        if (sid === null) return text ? [...prev, { type: 'msg', data: { id: uid(), role: 'assistant', text, streaming: false } }] : prev
+        return text
+          ? prev.map(it => it.type === 'msg' && it.data.id === sid ? { ...it, data: { ...it.data, text, streaming: false } } : it)
+          : prev.filter(it => !(it.type === 'msg' && it.data.id === sid))
       })
-    })
+    }
+
+    handlers['tool_call'] = (d: { tool: string; args: string }) => {
+      const toolId = uid() // allocate outside setState — never call uid() inside an updater
+      setItems(prev => [...prev, { type: 'tool', data: { id: toolId, kind: 'call', tool: d.tool, body: d.args } }])
+    }
 
     handlers['tool_result'] = ((d: { tool: string; result: string }) => {
       const resultId = uid()
@@ -1634,6 +1630,16 @@ export default function App() {
                     <span>Desktop notifications</span>
                   </label>
                   <div className="field-hint">Alert me when a long task finishes, a permission is needed, or an error occurs — only while the window is in the background.</div>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="tool-calling">Tool calling</label>
+                  <select id="tool-calling" value={cfg.tool_calling || 'auto'}
+                    onChange={e => setCfg(c => ({ ...c, tool_calling: e.target.value }))}>
+                    <option value="auto">Automatic — native when the model supports it</option>
+                    <option value="text">Text protocol</option>
+                  </select>
+                  <div className="field-hint">Choose the text protocol if a model claims to support tools but uses them badly.</div>
                 </div>
 
                 <div className="field">
