@@ -118,3 +118,18 @@ func (a *App) RestartMCPServer(name string) string {
 func (a *App) ProbeMCPServer(srv config.MCPServerConfig) ([]string, error) {
 	return tools.ProbeMCPServer(srv)
 }
+
+type ToolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+func (a *App) ListTools() []ToolInfo {
+	reg := tools.DefaultRegistry("/")
+	all := reg.All()
+	out := make([]ToolInfo, len(all))
+	for i, t := range all {
+		out[i] = ToolInfo{Name: t.Name(), Description: t.Description()}
+	}
+	return out
+}
