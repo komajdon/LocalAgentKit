@@ -258,6 +258,62 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+	export class ConversationView {
+	    id: string;
+	    title: string;
+	    work_dir: string;
+	    model?: string;
+	    pinned?: boolean;
+	    tags?: string[];
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
+	    messages: history.SavedMessage[];
+	    display_items?: number[];
+	    token_usage?: history.TokenUsage;
+	    running: boolean;
+	    seq: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConversationView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.work_dir = source["work_dir"];
+	        this.model = source["model"];
+	        this.pinned = source["pinned"];
+	        this.tags = source["tags"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.messages = this.convertValues(source["messages"], history.SavedMessage);
+	        this.display_items = source["display_items"];
+	        this.token_usage = this.convertValues(source["token_usage"], history.TokenUsage);
+	        this.running = source["running"];
+	        this.seq = source["seq"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ModelList {
 	    models: string[];
 	    error?: string;
@@ -270,6 +326,20 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.models = source["models"];
 	        this.error = source["error"];
+	    }
+	}
+	export class RunState {
+	    conversation_id: string;
+	    run_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RunState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.conversation_id = source["conversation_id"];
+	        this.run_id = source["run_id"];
 	    }
 	}
 	export class ToolInfo {

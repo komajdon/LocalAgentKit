@@ -8,7 +8,7 @@ import {
   DeleteConversation, UpdateConversationPath, RenameConversation,
   SearchConversations, ExportConversation, SetConversationModel,
   TruncateAndResend, SetConversationPinned, SetConversationTags,
-  ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, SaveConfig, PickDirectory,
+  ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, GetRunState, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, ProbeMCPServer,
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation,
@@ -42,6 +42,18 @@ type Item =
   | { type: 'msg';   data: ChatMsg }
   | { type: 'tool';  data: ToolEvt }
   | { type: 'error'; id: number; text: string }
+  | { type: 'status'; id: number; text: string }
+
+interface ChatEvent { conversation_id: string; run_id: string; seq: number; data: any }
+const CHAT_EVENTS = ['started', 'thinking', 'chunk', 'tool_call', 'tool_result', 'context_usage', 'done', 'stopped', 'error']
+const FINAL_EVENTS = ['done', 'stopped', 'error']
+
+// Stored transcript items keep their text under data; the view does not for
+// error and status rows.
+const fromStored = (it: any, id: number): Item =>
+  it.type === 'error' || it.type === 'status'
+    ? { type: it.type, id, text: it.data.text }
+    : { ...it, data: { ...it.data, id, streaming: !!it.data.streaming } }
 
 type PermMode = 'ask' | 'allow' | 'deny'
 
@@ -123,7 +135,14 @@ export default function App() {
 
   const [items, setItems]     = useState<Item[]>([])
   const [input, setInput]     = useState('')
-  const [running, setRunning] = useState(false)
+  // The single run may belong to a conversation other than the one shown.
+  const [runConv, setRunConv] = useState<string | null>(null)
+  const running = runConv !== null && runConv === activeId
+  const busy = runConv !== null
+  const activeIdRef = useRef<string | null>(null)
+  // Events arriving while a conversation loads are held and replayed.
+  const loadRef = useRef({ token: 0, buffering: false, buffer: [] as [string, ChatEvent][] })
+  const applyRef = useRef<(name: string, data: any) => void>(() => {})
   const [thinking, setThinking] = useState(false)
   const [loadingConv, setLoadingConv] = useState(false)
   const [permReq, setPermReq] = useState<PermReq | null>(null)
@@ -278,7 +297,7 @@ export default function App() {
   const VIRTUAL_OVERSCAN = 6
 
   const estItemHeight = (it: Item): number => {
-    if (it.type === 'error') return 48
+    if (it.type === 'error' || it.type === 'status') return 48
     if (it.type === 'tool') return 48
     return Math.max(80, Math.min(500, it.data.text.length * 0.3 + 50))
   }
@@ -357,9 +376,12 @@ export default function App() {
   useEffect(() => {
     const offs: (() => void)[] = []
 
-    offs.push(EventsOn('chat:thinking', () => setThinking(true)))
+    const handlers: Record<string, (d: any) => void> = {}
 
-    offs.push(EventsOn('chat:chunk', (chunk: string) => {
+    handlers['started'] = () => {}
+    handlers['thinking'] = () => setThinking(true)
+
+    handlers['chunk'] = ((chunk: string) => {
       setThinking(false)
       if (streamIdRef.current !== null) {
         // Append to the existing streaming message — no side-effects needed.
@@ -376,43 +398,36 @@ export default function App() {
         streamIdRef.current = id
         setItems(prev => [...prev, { type: 'msg', data: { id, role: 'assistant', text: chunk, streaming: true } }])
       }
-    }))
+    })
 
-    offs.push(EventsOn('chat:done', () => {
-      setRunning(false); setThinking(false)
+    handlers['done'] = (() => {
+      setThinking(false)
       setItems(prev => prev.map(it =>
         it.type === 'msg' && it.data.id === streamIdRef.current
           ? { ...it, data: { ...it.data, streaming: false } }
           : it
       ))
       streamIdRef.current = null
-      if (sendStartRef.current && Date.now() - sendStartRef.current > 10_000) {
-        notify('Agent finished', 'The task completed and is ready for you.')
-      }
-      sendStartRef.current = 0
-      refreshList()
-    }))
+    })
 
-    offs.push(EventsOn('chat:stopped', () => {
-      setRunning(false); setThinking(false)
+    handlers['stopped'] = (() => {
+      setThinking(false)
       const sid = streamIdRef.current
       streamIdRef.current = null
-      setItems(prev => prev.map(it =>
+      setItems(prev => [...prev.map(it =>
         it.type === 'msg' && it.data.id === sid
-          ? { ...it, data: { ...it.data, text: it.data.text + '\n\n— stopped by user', streaming: false } }
+          ? { ...it, data: { ...it.data, streaming: false } }
           : it
-      ))
-    }))
+      ), { type: 'status', id: uid(), text: 'Stopped by user' }])
+    })
 
-    offs.push(EventsOn('chat:error', (msg: string) => {
-      setRunning(false); setThinking(false)
+    handlers['error'] = ((msg: string) => {
+      setThinking(false)
       streamIdRef.current = null
-      sendStartRef.current = 0
       setItems(prev => [...prev, { type: 'error', id: uid(), text: msg }])
-      notify('Agent error', msg)
-    }))
+    })
 
-    offs.push(EventsOn('chat:tool_call', (d: { tool: string; args: string }) => {
+    handlers['tool_call'] = ((d: { tool: string; args: string }) => {
       const sid = streamIdRef.current
       streamIdRef.current = null
       const toolId = uid() // allocate outside setState — never call uid() inside an updater
@@ -432,12 +447,12 @@ export default function App() {
         }
         return [...next, { type: 'tool', data: { id: toolId, kind: 'call', tool: d.tool, body: d.args } }]
       })
-    }))
+    })
 
-    offs.push(EventsOn('chat:tool_result', (d: { tool: string; result: string }) => {
+    handlers['tool_result'] = ((d: { tool: string; result: string }) => {
       const resultId = uid()
       setItems(prev => [...prev, { type: 'tool', data: { id: resultId, kind: 'result', tool: d.tool, body: d.result } }])
-    }))
+    })
 
     offs.push(EventsOn('chat:permission_request', (req: PermReq) => {
       setPermReq(req)
@@ -448,7 +463,30 @@ export default function App() {
       setPermReq(cur => (cur?.id === id ? null : cur))
     }))
 
-    offs.push(EventsOn('chat:context_usage', (u: ContextUsage) => setCtxUsage(u)))
+    handlers['context_usage'] = (u: ContextUsage) => setCtxUsage(u)
+
+    applyRef.current = (name, data) => handlers[name]?.(data)
+
+    for (const name of CHAT_EVENTS) {
+      offs.push(EventsOn(`chat:${name}`, (e: ChatEvent) => {
+        // Run bookkeeping applies whichever conversation is on screen.
+        if (name === 'started') setRunConv(e.conversation_id)
+        if (FINAL_EVENTS.includes(name)) {
+          setRunConv(cur => (cur === e.conversation_id ? null : cur))
+          if (name === 'error') notify('Agent error', e.data)
+          else if (name === 'done' && sendStartRef.current && Date.now() - sendStartRef.current > 10_000) {
+            notify('Agent finished', 'The task completed and is ready for you.')
+          }
+          sendStartRef.current = 0
+          refreshList()
+        }
+        if (e.conversation_id !== activeIdRef.current) return
+        if (loadRef.current.buffering) loadRef.current.buffer.push([name, e])
+        else applyRef.current(name, e.data)
+      }))
+    }
+
+    GetRunState().then(r => { if (r.run_id) setRunConv(r.conversation_id) }).catch(() => {})
 
     offs.push(EventsOn('chat:usage_budget', (b: UsageBudget) => setBudget(b)))
 
@@ -479,30 +517,43 @@ export default function App() {
   const refreshList = () => ListConversations().then((l: any) => setConvList(l || []))
 
   const openConv = async (id: string) => {
+    const load = loadRef.current
+    const token = ++load.token
+    load.buffering = true
+    load.buffer = []
+    activeIdRef.current = id
     setLoadingConv(true)
-    let conv: SavedConv
+    let conv: SavedConv & { running?: boolean; seq?: number }
     try {
-      conv = await LoadConversation(id) as SavedConv
+      conv = await LoadConversation(id) as any
+    } catch (err) {
+      if (token === load.token) load.buffering = false
+      throw err
     } finally {
-      setLoadingConv(false)
+      if (token === load.token) setLoadingConv(false)
     }
+    if (token !== load.token) return // a newer load replaced this one
+
     setActiveId(conv.id); setActiveTitle(conv.title); setActivePath(conv.work_dir)
     setConvModel((conv as any).model || '')
     setCtxUsage(null)
-    setRunning(false); streamIdRef.current = null
+    setThinking(false); streamIdRef.current = null
     GetContextUsage().then((u: any) => setCtxUsage(u)).catch(() => {})
 
-    if (conv.display_items?.length) {
-      setItems(conv.display_items.map((it: any) => ({
-        ...it,
-        data: { ...it.data, id: uid(), streaming: false },
-      })))
-    } else {
-      setItems(conv.messages
+    const loaded: Item[] = conv.display_items?.length
+      ? conv.display_items.map((it: any) => fromStored(it, uid()))
+      : conv.messages
         .filter(m => (m.role === 'user' || m.role === 'assistant') && !m.content.startsWith('TOOL_RESULT'))
         .map(m => ({ type: 'msg' as const, data: { id: uid(), role: m.role as MsgRole, text: m.content, streaming: false } }))
-      )
+    const last = loaded[loaded.length - 1]
+    if (conv.running && last?.type === 'msg' && last.data.streaming) streamIdRef.current = last.data.id
+    setItems(loaded)
+
+    load.buffering = false
+    for (const [name, e] of load.buffer) {
+      if (e.seq > (conv.seq || 0)) applyRef.current(name, e.data)
     }
+    load.buffer = []
   }
 
   const createConv = async () => {
@@ -514,7 +565,7 @@ export default function App() {
   const delConv = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation()
     await DeleteConversation(id)
-    if (activeId === id) { setActiveId(null); setItems([]); setActiveTitle(''); setActivePath('') }
+    if (activeId === id) { activeIdRef.current = null; setActiveId(null); setItems([]); setActiveTitle(''); setActivePath('') }
     refreshList()
   }
 
@@ -560,21 +611,33 @@ export default function App() {
     setConvList(prev => prev.map(c => c.id === activeId ? { ...c, work_dir: dir } : c))
   }
 
+  // Optimistic state for a run that is about to start.
+  const startedRun = (id: string) => {
+    setRunConv(id); setThinking(true); streamIdRef.current = null
+    sendStartRef.current = Date.now()
+  }
+  const runRejected = (id: string, error?: string) => {
+    if (!error) return
+    setRunConv(cur => (cur === id ? null : cur))
+    setThinking(false)
+    if (activeIdRef.current === id) setItems(prev => [...prev, { type: 'error', id: uid(), text: error }])
+    GetRunState().then(r => setRunConv(r.run_id ? r.conversation_id : null)).catch(() => {})
+  }
+
   const send = useCallback(() => {
     const text = input.trim()
-    if (!text || running || !activeId) return
+    if (!text || busy || !activeId) return
     setItems(prev => [...prev, { type: 'msg', data: { id: uid(), role: 'user', text } }])
-    setInput(''); setRunning(true); setThinking(true); streamIdRef.current = null
-    sendStartRef.current = Date.now()
-    SendMessage(text)
-  }, [input, running, activeId])
+    setInput(''); startedRun(activeId)
+    SendMessage(activeId, text).then(r => runRejected(activeId, r.error))
+  }, [input, busy, activeId])
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
   const startEdit = (id: number, text: string) => {
-    if (running) return
+    if (busy) return
     setEditingId(id); setEditValue(text)
   }
 
@@ -582,7 +645,7 @@ export default function App() {
   // replace the message, and re-run the agent from there.
   const commitEdit = (id: number) => {
     const text = editValue.trim()
-    if (!text || running) { setEditingId(null); return }
+    if (!text || busy || !activeId) { setEditingId(null); return }
     const idx = items.findIndex(it => it.type === 'msg' && it.data.id === id)
     if (idx < 0) { setEditingId(null); return }
     // userOrdinal = how many user messages precede this one in the transcript.
@@ -593,9 +656,8 @@ export default function App() {
     }
     setItems(prev => [...prev.slice(0, idx), { type: 'msg', data: { id: uid(), role: 'user', text } }])
     setEditingId(null); setEditValue('')
-    setRunning(true); setThinking(true); streamIdRef.current = null
-    sendStartRef.current = Date.now()
-    TruncateAndResend(userOrdinal, text)
+    startedRun(activeId)
+    TruncateAndResend(activeId, userOrdinal, text).then(r => runRejected(activeId, r.error))
   }
 
   const autoResize = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -674,25 +736,13 @@ export default function App() {
   }
 
   const branchFromHere = async (itemIdx: number) => {
-    if (!activeId || running) return
+    if (!activeId || busy) return
     try {
-      const branchItem = items[itemIdx]
       const conv = await BranchConversation(activeId, itemIdx) as any
       await refreshList()
-      setActiveId(conv.id); setActiveTitle(conv.title); setActivePath(conv.work_dir)
-      setConvModel(conv.model || '')
-      const nextItems: Item[] = (conv.display_items || []).map((it: any) => ({
-        ...it,
-        data: { ...it.data, id: uid(), streaming: false },
-      }))
-      if (branchItem?.type === 'msg' && branchItem.data.role === 'user') {
-        nextItems.push({ type: 'msg', data: { id: uid(), role: 'user', text: branchItem.data.text } })
-        setRunning(true); setThinking(true); streamIdRef.current = null
-        sendStartRef.current = Date.now()
-      }
-      setItems(nextItems)
-    } catch (err) {
-      console.error('branch failed', err)
+      await openConv(conv.id)
+    } catch (err: any) {
+      setItems(prev => [...prev, { type: 'error', id: uid(), text: `Could not branch: ${err?.message ?? err}` }])
     }
   }
 
@@ -1012,6 +1062,8 @@ export default function App() {
                       const globalIdx = start + i
                       if (item.type === 'error')
                         return <div key={item.id} className="error-row" role="alert">⚠ {item.text}</div>
+                      if (item.type === 'status')
+                        return <div key={item.id} className="field-hint" role="status" style={{ textAlign: 'center' }}>— {item.text} —</div>
                       if (item.type === 'tool') {
                         const t = item.data
                         return (
@@ -1138,9 +1190,16 @@ export default function App() {
 
               {running
                 ? <button className="send-btn stop" onClick={() => StopAgent()} title="Stop">⏹</button>
-                : <button className="send-btn" onClick={send} disabled={!input.trim() || transcribing}>➤</button>
+                : <button className="send-btn" onClick={send} disabled={!input.trim() || transcribing || busy}>➤</button>
               }
             </div>
+            {busy && !running && (
+              <div className="field-hint" role="status" style={{ textAlign: 'center' }}>
+                The agent is working in another conversation.{' '}
+                <button className="btn secondary" onClick={() => openConv(runConv!)}>Show it</button>{' '}
+                <button className="btn danger" onClick={() => StopAgent()}>Stop it</button>
+              </div>
+            )}
             {sttError && (
               <div className="stt-error" onClick={() => setSttError('')}>⚠ {sttError}</div>
             )}

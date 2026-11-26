@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,16 +14,13 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	appLayer "agent-gui/app"
 	"agent-gui/domain"
 	"agent-gui/internal/config"
 	"agent-gui/internal/history"
 	"agent-gui/internal/permission"
 	"agent-gui/internal/recorder"
-	"agent-gui/internal/sandbox"
 	"agent-gui/internal/store"
 	"agent-gui/internal/whisper"
-	"agent-gui/llm"
 	"agent-gui/tools"
 )
 
@@ -35,20 +33,23 @@ type displayItem struct {
 // App is the Wails-bound facade. All public methods are exposed to the frontend.
 type App struct {
 	ctx context.Context
-	cfg config.Config
 
-	startupErr    string // set once during startup
-	restoreStaged bool   // guarded by mu
+	startupErr string // set once during startup
 
-	mu       sync.Mutex
-	agent    *appLayer.ConversationalAgent
-	cancelFn context.CancelFunc
+	// convMu serialises read-modify-write of stored conversations. It is
+	// taken before mu.
+	convMu sync.Mutex
 
-	permissions *permission.Manager
-	pending     *pendingPrompt // guarded by mu
-	promptSeq   uint64         // guarded by mu
+	mu            sync.Mutex
+	cfg           config.Config
+	activeID      string // conversation the UI is showing
+	run           *run   // the single active run, or nil
+	runSeq        uint64
+	restoreStaged bool
 
-	activeConv *history.Conversation
+	permissions *permission.Manager // set once during startup
+	pending     *pendingPrompt      // guarded by mu
+	promptSeq   uint64              // guarded by mu
 
 	// globalTokens is the account-wide cumulative token count (prompt+completion
 	// across all conversations) backing the shared usage budget. Guarded by mu.
@@ -56,12 +57,20 @@ type App struct {
 
 	recMu  sync.Mutex
 	recSes *recorder.Session
+
+	// Seams replaced by tests.
+	emit        func(name string, data any)
+	logf        func(format string, args ...any)
+	providerFor func(config.Config) domain.LLMProvider
 }
 
 func NewApp() *App {
 	// Without a store this cannot fail; startup reloads persisted grants.
 	m, _ := permission.NewManager(nil)
-	return &App{permissions: m}
+	a := &App{permissions: m, providerFor: newProvider}
+	a.emit = func(name string, data any) { runtime.EventsEmit(a.ctx, name, data) }
+	a.logf = func(format string, args ...any) { runtime.LogErrorf(a.ctx, format, args...) }
+	return a
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -85,7 +94,16 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(ctx context.Context) {
 	a.mu.Lock()
 	restoring := a.restoreStaged
+	active := a.run
 	a.mu.Unlock()
+	// Let a run stop and save before the store closes.
+	if active != nil {
+		a.StopAgent()
+		select {
+		case <-active.done:
+		case <-time.After(shutdownWait):
+		}
+	}
 	// After a restore was staged, keep the archives from before it intact.
 	if !restoring && a.startupErr == "" {
 		if err := writeAutoBackup(filepath.Join(store.DataDir(), "backups")); err != nil {
@@ -101,10 +119,13 @@ func (a *App) GetStartupError() string { return a.startupErr }
 
 // ── Branching ───────────────────────────────────────────────────────────────────
 
-// BranchConversation creates a new conversation that is a copy of the source
-// conversation up to (and including) the message at displayItemIndex. It
-// re-sends the last user message in the copy and returns the new conversation.
+// BranchConversation creates a copy of the conversation up to the item at
+// displayItemIndex. Branching from a user message sends that message again in
+// the new branch, so it needs the agent to be idle.
 func (a *App) BranchConversation(id string, displayItemIndex int) (*history.Conversation, error) {
+	if a.GetRunState().RunID != "" {
+		return nil, errors.New("stop the agent before branching")
+	}
 	src, err := history.Load(id)
 	if err != nil {
 		return nil, err
@@ -132,6 +153,10 @@ func (a *App) BranchConversation(id string, displayItemIndex int) (*history.Conv
 		}
 		role, _ := it.Data["role"].(string)
 		if role != "user" && role != "assistant" {
+			continue
+		}
+		// Older transcripts stored replies that were only tool calls.
+		if t, _ := it.Data["text"].(string); role == "assistant" && stripToolCalls(t) == "" && i != displayItemIndex {
 			continue
 		}
 		if i == displayItemIndex {
@@ -181,25 +206,12 @@ func (a *App) BranchConversation(id string, displayItemIndex int) (*history.Conv
 		return nil, err
 	}
 
-	// Build agent, inject history, and re-send the branching message.
-	agent := a.buildAgent(branch.WorkDir)
-	for _, m := range branch.Messages {
-		agent.InjectMessage(domain.Role(m.Role), m.Content)
+	a.setActive(branch.ID)
+	if resendText != "" {
+		if resp := a.startRun(branch.ID, resendText, nil); resp.Error != "" {
+			return nil, errors.New(resp.Error)
+		}
 	}
-	agent.SetUsage(branch.TokenUsage.PromptTokens, branch.TokenUsage.CompletionTokens)
-
-	a.mu.Lock()
-	a.activeConv = branch
-	a.agent = agent
-	a.mu.Unlock()
-
-	if resendText == "" {
-		return branch, nil
-	}
-
-	// Re-send the message on the branch.
-	a.SendMessage(resendText)
-
 	return branch, nil
 }
 
@@ -357,153 +369,10 @@ func isVisibleSavedMessage(m history.SavedMessage) bool {
 	if m.Role != "user" && m.Role != "assistant" {
 		return false
 	}
+	if m.Role == "assistant" {
+		return visibleReply(m.Content) != ""
+	}
 	return !strings.HasPrefix(m.Content, "TOOL_RESULT")
-}
-
-func (a *App) newProvider() domain.LLMProvider {
-	switch a.cfg.Provider {
-	case config.ProviderOpenAI:
-		return llm.NewOpenAIProvider(a.cfg.BaseURL, a.cfg.APIKey)
-	case config.ProviderOllama:
-		return llm.NewOllamaProvider(a.cfg.BaseURL)
-	default:
-		if info, ok := llm.FreeProviderConfigs[string(a.cfg.Provider)]; ok {
-			return llm.NewFreeProvider(info.BaseURL, a.cfg.APIKey, info.Models)
-		}
-		return llm.NewOllamaProvider(a.cfg.BaseURL)
-	}
-}
-
-func (a *App) buildAgent(workDir string) *appLayer.ConversationalAgent {
-	provider := a.newProvider()
-
-	registry := tools.NewRegistry(tools.Options{
-		WorkDir:    workDir,
-		MCPServers: a.cfg.MCPServers,
-		Search:     tools.SearchConfig{Provider: a.cfg.SearchProvider, APIKey: a.cfg.SearchAPIKey},
-		Sandbox:    a.sandboxOptions(),
-		Protected:  []string{store.DataDir()},
-	})
-	agent := appLayer.NewConversationalAgent(a.cfg.Model, provider, registry, a.cfg.SystemPrompt, a.cfg.ContextLimit)
-
-	agent.OnChunk = func(chunk string) {
-		runtime.EventsEmit(a.ctx, "chat:chunk", chunk)
-	}
-	agent.OnToolCall = func(name string, args domain.Args) {
-		runtime.EventsEmit(a.ctx, "chat:tool_call", map[string]any{
-			"tool": name,
-			"args": args.Format(),
-		})
-	}
-	agent.OnToolResult = func(name, result string) {
-		runtime.EventsEmit(a.ctx, "chat:tool_result", map[string]any{
-			"tool":   name,
-			"result": result,
-		})
-	}
-	agent.OnContextUsage = func(usage appLayer.ContextUsage) {
-		runtime.EventsEmit(a.ctx, "chat:context_usage", usage)
-	}
-	agent.OnPermissionRequest = func(req appLayer.PermissionRequest) bool {
-		return a.authorize(workDir, req)
-	}
-
-	return agent
-}
-
-func (a *App) sandboxOptions() sandbox.Options {
-	return sandbox.Options{Mode: sandbox.Mode(a.cfg.SandboxMode), AllowNetwork: a.cfg.SandboxNetwork}
-}
-
-// GetSandboxStatus reports the isolation shell commands currently get.
-func (a *App) GetSandboxStatus() sandbox.Status {
-	return sandbox.Probe(a.sandboxOptions())
-}
-
-// ── Conversations ─────────────────────────────────────────────────────────────
-
-func (a *App) ListConversations() ([]history.ConvMeta, error) {
-	return history.List()
-}
-
-func (a *App) NewConversation(workDir string) (*history.Conversation, error) {
-	if workDir == "" {
-		workDir, _ = os.UserHomeDir()
-	}
-	now := time.Now()
-	conv := &history.Conversation{
-		ConvMeta: history.ConvMeta{
-			ID:        fmt.Sprintf("%d", now.UnixMilli()),
-			Title:     "New conversation",
-			WorkDir:   workDir,
-			CreatedAt: now,
-			UpdatedAt: now,
-		},
-		Messages:     []history.SavedMessage{},
-		DisplayItems: json.RawMessage("[]"),
-	}
-	if err := history.Save(conv); err != nil {
-		return nil, err
-	}
-	a.mu.Lock()
-	a.activeConv = conv
-	a.agent = a.buildAgent(workDir)
-	a.mu.Unlock()
-	return conv, nil
-}
-
-func (a *App) LoadConversation(id string) (*history.Conversation, error) {
-	conv, err := history.Load(id)
-	if err != nil {
-		return nil, err
-	}
-	agent := a.buildAgent(conv.WorkDir)
-	for _, m := range conv.Messages {
-		agent.InjectMessage(domain.Role(m.Role), m.Content)
-	}
-	agent.SetUsage(conv.TokenUsage.PromptTokens, conv.TokenUsage.CompletionTokens)
-	a.mu.Lock()
-	a.activeConv = conv
-	a.agent = agent
-	a.mu.Unlock()
-	return conv, nil
-}
-
-func (a *App) DeleteConversation(id string) error {
-	return history.Delete(id)
-}
-
-func (a *App) SearchConversations(query string) ([]history.ConvMeta, error) {
-	return history.Search(query)
-}
-
-func (a *App) ExportConversation(id, format string) (string, error) {
-	conv, err := history.Load(id)
-	if err != nil {
-		return "", err
-	}
-	return history.Export(conv, format), nil
-}
-
-func (a *App) SetConversationModel(model string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.activeConv == nil {
-		return fmt.Errorf("no active conversation")
-	}
-	a.activeConv.Model = model
-	a.activeConv.UpdatedAt = time.Now()
-	a.agent.SetModel(model)
-	return history.Save(a.activeConv)
-}
-
-func (a *App) GetContextUsage() appLayer.ContextUsage {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.agent == nil {
-		return appLayer.ContextUsage{}
-	}
-	return a.agent.CurrentUsage()
 }
 
 // UsageBudget is the shared account-wide usage pool: a fixed data + fund
@@ -545,132 +414,6 @@ func (a *App) GetUsageBudget() UsageBudget {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.computeBudget()
-}
-
-func (a *App) RenameConversation(id, title string) error {
-	conv, err := history.Load(id)
-	if err != nil {
-		return err
-	}
-	conv.Title = strings.TrimSpace(title)
-	if conv.Title == "" {
-		return fmt.Errorf("title cannot be empty")
-	}
-	conv.UpdatedAt = time.Now()
-	if err := history.Save(conv); err != nil {
-		return err
-	}
-	a.mu.Lock()
-	if a.activeConv != nil && a.activeConv.ID == id {
-		a.activeConv.Title = conv.Title
-	}
-	a.mu.Unlock()
-	return nil
-}
-
-// SetConversationPinned pins or unpins a conversation in the sidebar.
-func (a *App) SetConversationPinned(id string, pinned bool) error {
-	conv, err := history.Load(id)
-	if err != nil {
-		return err
-	}
-	conv.Pinned = pinned
-	if err := history.Save(conv); err != nil {
-		return err
-	}
-	a.mu.Lock()
-	if a.activeConv != nil && a.activeConv.ID == id {
-		a.activeConv.Pinned = pinned
-	}
-	a.mu.Unlock()
-	return nil
-}
-
-// SetConversationTags replaces a conversation's tag list (trimmed, de-duplicated).
-func (a *App) SetConversationTags(id string, tags []string) error {
-	conv, err := history.Load(id)
-	if err != nil {
-		return err
-	}
-	seen := map[string]bool{}
-	clean := make([]string, 0, len(tags))
-	for _, t := range tags {
-		t = strings.TrimSpace(t)
-		if t == "" || seen[strings.ToLower(t)] {
-			continue
-		}
-		seen[strings.ToLower(t)] = true
-		clean = append(clean, t)
-	}
-	conv.Tags = clean
-	if err := history.Save(conv); err != nil {
-		return err
-	}
-	a.mu.Lock()
-	if a.activeConv != nil && a.activeConv.ID == id {
-		a.activeConv.Tags = clean
-	}
-	a.mu.Unlock()
-	return nil
-}
-
-func (a *App) UpdateConversationPath(workDir string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.activeConv == nil {
-		return fmt.Errorf("no active conversation")
-	}
-	a.activeConv.WorkDir = workDir
-	a.activeConv.UpdatedAt = time.Now()
-	a.agent = a.buildAgent(workDir)
-	return history.Save(a.activeConv)
-}
-
-// ── Chat ──────────────────────────────────────────────────────────────────────
-
-type ChatResponse struct {
-	Error string `json:"error,omitempty"`
-}
-
-// TruncateAndResend rewrites history up to the userOrdinal-th user message
-// (0-based), drops everything from that message onward, rebuilds the agent on
-// the truncated history, then sends newText as a fresh turn. Used by the
-// "edit & resend" affordance on user messages.
-func (a *App) TruncateAndResend(userOrdinal int, newText string) ChatResponse {
-	a.mu.Lock()
-	if a.agent == nil {
-		a.mu.Unlock()
-		return ChatResponse{Error: "no active conversation — create or load one first"}
-	}
-	if a.cancelFn != nil {
-		a.mu.Unlock()
-		return ChatResponse{Error: "agent is already running"}
-	}
-	conv := a.activeConv
-	if conv == nil {
-		a.mu.Unlock()
-		return ChatResponse{Error: "no active conversation"}
-	}
-
-	cut := userMessageIndex(conv.Messages, userOrdinal)
-	if cut < 0 {
-		a.mu.Unlock()
-		return ChatResponse{Error: "message to edit was not found"}
-	}
-	conv.Messages = conv.Messages[:cut]
-	conv.DisplayItems = truncateDisplayItems(conv.DisplayItems, userOrdinal)
-
-	// Rebuild the agent on the truncated history, preserving cumulative usage.
-	agent := a.buildAgent(conv.WorkDir)
-	for _, m := range conv.Messages {
-		agent.InjectMessage(domain.Role(m.Role), m.Content)
-	}
-	agent.SetUsage(conv.TokenUsage.PromptTokens, conv.TokenUsage.CompletionTokens)
-	a.agent = agent
-	_ = history.Save(conv)
-	a.mu.Unlock()
-
-	return a.SendMessage(newText)
 }
 
 // userMessageIndex returns the slice index of the ordinal-th user message
@@ -718,171 +461,6 @@ func truncateDisplayItems(raw json.RawMessage, ordinal int) json.RawMessage {
 	return json.RawMessage(out)
 }
 
-func (a *App) SendMessage(text string) ChatResponse {
-	a.mu.Lock()
-	if a.agent == nil {
-		a.mu.Unlock()
-		return ChatResponse{Error: "no active conversation — create or load one first"}
-	}
-	if a.cancelFn != nil {
-		a.mu.Unlock()
-		return ChatResponse{Error: "agent is already running"}
-	}
-	ctx, cancel := context.WithCancel(a.ctx)
-	a.cancelFn = cancel
-	conv := a.activeConv
-	convID := ""
-	if conv != nil {
-		convID = conv.ID
-	}
-	a.mu.Unlock()
-
-	go func() {
-		defer func() {
-			a.mu.Lock()
-			a.cancelFn = nil
-			a.mu.Unlock()
-		}()
-
-		var (
-			turnMu    sync.Mutex
-			asstBuf   strings.Builder
-			turnItems = []displayItem{
-				{Type: "msg", Data: map[string]any{"role": "user", "text": text, "streaming": false}},
-			}
-		)
-
-		a.mu.Lock()
-		origChunk := a.agent.OnChunk
-		origToolCall := a.agent.OnToolCall
-		origToolResult := a.agent.OnToolResult
-
-		a.agent.OnChunk = func(chunk string) {
-			turnMu.Lock()
-			asstBuf.WriteString(chunk)
-			turnMu.Unlock()
-			origChunk(chunk)
-		}
-		a.agent.OnToolCall = func(name string, args domain.Args) {
-			body := args.Format()
-			turnMu.Lock()
-			if asstBuf.Len() > 0 {
-				turnItems = append(turnItems, displayItem{
-					Type: "msg",
-					Data: map[string]any{"role": "assistant", "text": asstBuf.String(), "streaming": false},
-				})
-				asstBuf.Reset()
-			}
-			turnItems = append(turnItems, displayItem{
-				Type: "tool",
-				Data: map[string]any{"kind": "call", "tool": name, "body": body},
-			})
-			turnMu.Unlock()
-			origToolCall(name, args)
-		}
-		a.agent.OnToolResult = func(name, result string) {
-			turnMu.Lock()
-			turnItems = append(turnItems, displayItem{
-				Type: "tool",
-				Data: map[string]any{"kind": "result", "tool": name, "body": result},
-			})
-			turnMu.Unlock()
-			origToolResult(name, result)
-		}
-		a.mu.Unlock()
-
-		runtime.EventsEmit(a.ctx, "chat:thinking", nil)
-		err := a.agent.Chat(ctx, text)
-
-		a.mu.Lock()
-		a.agent.OnChunk = origChunk
-		a.agent.OnToolCall = origToolCall
-		a.agent.OnToolResult = origToolResult
-		a.mu.Unlock()
-
-		if err != nil {
-			if ctx.Err() != nil {
-				runtime.EventsEmit(a.ctx, "chat:stopped", nil)
-			} else {
-				runtime.EventsEmit(a.ctx, "chat:error", err.Error())
-			}
-			return
-		}
-
-		turnMu.Lock()
-		if asstBuf.Len() > 0 {
-			turnItems = append(turnItems, displayItem{
-				Type: "msg",
-				Data: map[string]any{"role": "assistant", "text": asstBuf.String(), "streaming": false},
-			})
-		}
-		turnMu.Unlock()
-
-		if conv != nil {
-			a.mu.Lock()
-			// Guard against the active conversation being switched while we were running.
-			if a.activeConv == nil || a.activeConv.ID != convID {
-				a.mu.Unlock()
-				runtime.EventsEmit(a.ctx, "chat:done", nil)
-				return
-			}
-
-			msgs := a.agent.Messages()
-			conv.Messages = make([]history.SavedMessage, len(msgs))
-			for i, m := range msgs {
-				conv.Messages[i] = history.SavedMessage{Role: string(m.Role), Content: m.Content}
-			}
-
-			if conv.Title == "New conversation" {
-				for _, m := range msgs {
-					if m.Role == domain.RoleUser {
-						t := m.Content
-						if len(t) > 60 {
-							t = t[:57] + "…"
-						}
-						conv.Title = t
-						break
-					}
-				}
-			}
-
-			existing := parseDisplayItems(conv.DisplayItems)
-			all := append(existing, turnItems...)
-			if raw, err := json.Marshal(all); err == nil {
-				conv.DisplayItems = json.RawMessage(raw)
-			}
-
-			oldTotal := int64(conv.TokenUsage.PromptTokens + conv.TokenUsage.CompletionTokens)
-			prompt, completion := a.agent.Usage()
-			conv.TokenUsage = history.TokenUsage{PromptTokens: prompt, CompletionTokens: completion}
-			// Advance the shared account-wide counter by only the new tokens.
-			if delta := int64(prompt+completion) - oldTotal; delta > 0 {
-				a.globalTokens += delta
-			}
-			budget := a.computeBudget()
-
-			conv.UpdatedAt = time.Now()
-			_ = history.Save(conv)
-			a.mu.Unlock()
-
-			runtime.EventsEmit(a.ctx, "chat:usage_budget", budget)
-		}
-
-		runtime.EventsEmit(a.ctx, "chat:done", nil)
-	}()
-
-	return ChatResponse{}
-}
-
-func (a *App) StopAgent() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.cancelFn != nil {
-		a.cancelFn()
-		a.replyLocked("")
-	}
-}
-
 // ── Tools ─────────────────────────────────────────────────────────────────────
 
 type ToolInfo struct {
@@ -898,22 +476,6 @@ func (a *App) ListTools() []ToolInfo {
 		out[i] = ToolInfo{Name: t.Name(), Description: t.Description()}
 	}
 	return out
-}
-
-// ── Models & config ───────────────────────────────────────────────────────────
-
-type ModelList struct {
-	Models []string `json:"models"`
-	Error  string   `json:"error,omitempty"`
-}
-
-func (a *App) ListModels() ModelList {
-	provider := a.newProvider()
-	models, err := provider.ListModels()
-	if err != nil {
-		return ModelList{Error: err.Error()}
-	}
-	return ModelList{Models: models}
 }
 
 // ── Version & updates ─────────────────────────────────────────────────────────
@@ -992,39 +554,6 @@ func isNewerVersion(latest, current string) bool {
 	return false
 }
 
-func (a *App) GetConfig() config.Config {
-	safe := a.cfg
-	if len(safe.APIKey) > 4 {
-		safe.APIKey = "***" + safe.APIKey[len(safe.APIKey)-4:]
-	}
-	if len(safe.SearchAPIKey) > 4 {
-		safe.SearchAPIKey = "***" + safe.SearchAPIKey[len(safe.SearchAPIKey)-4:]
-	}
-	return safe
-}
-
-func (a *App) SaveConfig(cfg config.Config) string {
-	// If a key was returned masked (starts with ***), keep the real stored key.
-	if strings.HasPrefix(cfg.APIKey, "***") {
-		cfg.APIKey = a.cfg.APIKey
-	}
-	if strings.HasPrefix(cfg.SearchAPIKey, "***") {
-		cfg.SearchAPIKey = a.cfg.SearchAPIKey
-	}
-	a.mu.Lock()
-	a.cfg = cfg
-	a.mu.Unlock()
-	if err := config.Save(cfg); err != nil {
-		return err.Error()
-	}
-	a.mu.Lock()
-	if a.activeConv != nil {
-		a.agent = a.buildAgent(a.activeConv.WorkDir)
-	}
-	a.mu.Unlock()
-	return ""
-}
-
 // ── Speech-to-text ────────────────────────────────────────────────────────────
 
 // WhisperAvailable reports whether the whisper CLI is installed on PATH.
@@ -1036,7 +565,7 @@ func (a *App) WhisperAvailable() bool {
 // and returns the plain-text transcript.
 // On first call the model (~74 MB for base) is downloaded automatically.
 func (a *App) TranscribeAudio(audioBytes []byte) (string, error) {
-	model := a.cfg.WhisperModel
+	model := a.config().WhisperModel
 	if model == "" {
 		model = "base"
 	}
@@ -1088,7 +617,7 @@ func (a *App) StopRecording() (string, error) {
 		return "", err
 	}
 
-	model := a.cfg.WhisperModel
+	model := a.config().WhisperModel
 	if model == "" {
 		model = "base"
 	}
@@ -1115,30 +644,6 @@ func (a *App) PickDirectory() string {
 		return ""
 	}
 	return dir
-}
-
-// ── MCP server management ────────────────────────────────────────────────────
-
-func (a *App) ListMCPServers() []config.MCPServerConfig {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.cfg.MCPServers
-}
-
-func (a *App) SaveMCPServers(servers []config.MCPServerConfig) string {
-	a.mu.Lock()
-	a.cfg.MCPServers = servers
-	cfg := a.cfg
-	a.mu.Unlock()
-	if err := config.Save(cfg); err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
-// ProbeMCPServer starts a server temporarily, lists its tools, and returns their names.
-func (a *App) ProbeMCPServer(srv config.MCPServerConfig) ([]string, error) {
-	return tools.ProbeMCPServer(srv)
 }
 
 // parseDisplayItems safely parses existing display items from raw JSON.

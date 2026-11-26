@@ -50,9 +50,12 @@ type ConversationalAgent struct {
 	totalCompletionTokens int  // cumulative across the conversation
 	hasRealUsage          bool // true once any provider call reported usage
 
-	OnChunk             func(string)
-	OnToolCall          func(name string, args domain.Args)
-	OnToolResult        func(name, result string)
+	OnChunk      func(string)
+	OnToolCall   func(name string, args domain.Args)
+	OnToolResult func(name, result string)
+	// OnAssistantMessage fires when a reply, complete or interrupted, joins
+	// the history.
+	OnAssistantMessage  func(content string)
 	OnPermissionRequest func(req PermissionRequest) bool
 	OnContextUsage      func(usage ContextUsage)
 }
@@ -138,6 +141,13 @@ func (a *ConversationalAgent) CurrentUsage() ContextUsage {
 		usage.Estimated = true
 	}
 	return usage
+}
+
+func (a *ConversationalAgent) addAssistant(content string) {
+	a.conv.Add(domain.Message{Role: domain.RoleAssistant, Content: content})
+	if a.OnAssistantMessage != nil {
+		a.OnAssistantMessage(content)
+	}
 }
 
 func (a *ConversationalAgent) emitContextUsage() {

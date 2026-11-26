@@ -23,6 +23,8 @@ export function GetContextUsage():Promise<app.ContextUsage>;
 
 export function GetKeyLocation():Promise<string>;
 
+export function GetRunState():Promise<main.RunState>;
+
 export function GetSandboxStatus():Promise<sandbox.Status>;
 
 export function GetStartupError():Promise<string>;
@@ -45,7 +47,7 @@ export function ListPermissionGrants():Promise<Array<permission.Grant>>;
 
 export function ListTools():Promise<Array<main.ToolInfo>>;
 
-export function LoadConversation(arg1:string):Promise<history.Conversation>;
+export function LoadConversation(arg1:string):Promise<main.ConversationView>;
 
 export function NewConversation(arg1:string):Promise<history.Conversation>;
 
@@ -67,7 +69,7 @@ export function SaveMCPServers(arg1:Array<config.MCPServerConfig>):Promise<strin
 
 export function SearchConversations(arg1:string):Promise<Array<history.ConvMeta>>;
 
-export function SendMessage(arg1:string):Promise<main.ChatResponse>;
+export function SendMessage(arg1:string,arg2:string):Promise<main.ChatResponse>;
 
 export function SetConversationModel(arg1:string):Promise<void>;
 
@@ -85,7 +87,7 @@ export function StopRecording():Promise<string>;
 
 export function TranscribeAudio(arg1:Array<number>):Promise<string>;
 
-export function TruncateAndResend(arg1:number,arg2:string):Promise<main.ChatResponse>;
+export function TruncateAndResend(arg1:string,arg2:number,arg3:string):Promise<main.ChatResponse>;
 
 export function UpdateConversationPath(arg1:string):Promise<void>;
 

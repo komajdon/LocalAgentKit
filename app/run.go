@@ -23,8 +23,8 @@ const (
 // toolTimeout is the longest any single tool may run. Tests shorten it.
 var toolTimeout = 6 * time.Minute
 
-// interruptedNote ends a reply that was cut off.
-const interruptedNote = "[reply interrupted]"
+// InterruptedNote ends a reply that was cut off.
+const InterruptedNote = "[reply interrupted]"
 
 // canceledResult records a call that was not run because the user stopped.
 const canceledResult = "CANCELED: the user stopped the run"
@@ -59,7 +59,7 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 			// Tool calls in a partial reply are never run.
 			if response != "" {
 				a.recordUsage(usage)
-				a.conv.Add(domain.Message{Role: domain.RoleAssistant, Content: response + "\n\n" + interruptedNote})
+				a.addAssistant(response + "\n\n" + InterruptedNote)
 				a.emitContextUsage()
 			}
 			if ctx.Err() != nil {
@@ -69,7 +69,7 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 		}
 		a.recordUsage(usage)
 
-		a.conv.Add(domain.Message{Role: domain.RoleAssistant, Content: response})
+		a.addAssistant(response)
 		a.emitContextUsage()
 
 		pending := a.collectCalls(ctx, response)

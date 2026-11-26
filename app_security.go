@@ -1,10 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	appLayer "agent-gui/app"
 	"agent-gui/domain"
@@ -44,6 +43,8 @@ type PermissionPrompt struct {
 	Description string      `json:"description"`
 	Args        domain.Args `json:"args"`
 	Workspace   string      `json:"workspace"`
+	// ConversationID is the conversation whose run is asking.
+	ConversationID string `json:"conversation_id"`
 	permission.Details
 }
 
@@ -54,23 +55,23 @@ type pendingPrompt struct {
 }
 
 // authorize decides one tool call, prompting the user when needed.
-func (a *App) authorize(workspace string, req appLayer.PermissionRequest) bool {
+func (a *App) authorize(ctx context.Context, conversationID, workspace string, req appLayer.PermissionRequest) bool {
 	a.mu.Lock()
 	setting := string(a.cfg.ToolPermissions[req.Tool])
 	a.mu.Unlock()
 
 	switch a.permissions.Check(setting, workspace, req.Tool, req.Args, req.ExternalContent) {
 	case permission.Allow:
-		runtime.EventsEmit(a.ctx, "chat:tool_auto_allowed", req.Tool)
+		a.emit("chat:tool_auto_allowed", req.Tool)
 		return true
 	case permission.Deny:
-		runtime.EventsEmit(a.ctx, "chat:tool_auto_denied", req.Tool)
+		a.emit("chat:tool_auto_denied", req.Tool)
 		return false
 	}
 
 	details := permission.Describe(req.Tool, req.Args)
 	if req.Tool == "shell" {
-		details.Impact += " Current " + sandbox.Probe(a.sandboxOptions()).String() + "."
+		details.Impact += " Current " + sandbox.Probe(sandboxOptions(a.config())).String() + "."
 	}
 
 	if req.ExternalContent && details.Sensitive {
@@ -83,14 +84,15 @@ func (a *App) authorize(workspace string, req appLayer.PermissionRequest) bool {
 	a.pending = pending
 	a.mu.Unlock()
 
-	runtime.EventsEmit(a.ctx, "chat:permission_request", PermissionPrompt{
+	a.emit("chat:permission_request", PermissionPrompt{
 		ID: pending.id, Tool: req.Tool, Description: req.Description,
-		Args: req.Args, Workspace: workspace, Details: details,
+		Args: req.Args, Workspace: workspace, Details: details, ConversationID: conversationID,
 	})
 
 	var scope permission.Scope
 	select {
 	case scope = <-pending.reply:
+	case <-ctx.Done():
 	case <-time.After(permissionTimeout):
 	}
 
@@ -99,14 +101,14 @@ func (a *App) authorize(workspace string, req appLayer.PermissionRequest) bool {
 		a.pending = nil
 	}
 	a.mu.Unlock()
-	runtime.EventsEmit(a.ctx, "chat:permission_closed", pending.id)
+	a.emit("chat:permission_closed", pending.id)
 
 	if scope == "" {
 		return false
 	}
 	if err := a.permissions.Remember(scope, workspace, req.Tool, req.Args); err != nil {
 		// The call itself was approved; only remembering it failed.
-		runtime.LogErrorf(a.ctx, "could not save approval: %v", err)
+		a.logf("could not save approval: %v", err)
 	}
 	return true
 }

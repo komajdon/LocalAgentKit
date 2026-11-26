@@ -34,6 +34,10 @@ export function GetKeyLocation() {
   return window['go']['main']['App']['GetKeyLocation']();
 }
 
+export function GetRunState() {
+  return window['go']['main']['App']['GetRunState']();
+}
+
 export function GetSandboxStatus() {
   return window['go']['main']['App']['GetSandboxStatus']();
 }
@@ -122,8 +126,8 @@ export function SearchConversations(arg1) {
   return window['go']['main']['App']['SearchConversations'](arg1);
 }
 
-export function SendMessage(arg1) {
-  return window['go']['main']['App']['SendMessage'](arg1);
+export function SendMessage(arg1, arg2) {
+  return window['go']['main']['App']['SendMessage'](arg1, arg2);
 }
 
 export function SetConversationModel(arg1) {
@@ -158,8 +162,8 @@ export function TranscribeAudio(arg1) {
   return window['go']['main']['App']['TranscribeAudio'](arg1);
 }
 
-export function TruncateAndResend(arg1, arg2) {
-  return window['go']['main']['App']['TruncateAndResend'](arg1, arg2);
+export function TruncateAndResend(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TruncateAndResend'](arg1, arg2, arg3);
 }
 
 export function UpdateConversationPath(arg1) {

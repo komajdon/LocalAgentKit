@@ -143,7 +143,7 @@ func TestChatKeepsPartialReplyAndRunsNoToolFromIt(t *testing.T) {
 	if tool.Calls() != 0 {
 		t.Fatal("tool call from a partial reply ran")
 	}
-	if got := lastContent(a, 0); !strings.Contains(got, "echo") || !strings.HasSuffix(got, interruptedNote) {
+	if got := lastContent(a, 0); !strings.Contains(got, "echo") || !strings.HasSuffix(got, InterruptedNote) {
 		t.Fatalf("history = %q", got)
 	}
 }
