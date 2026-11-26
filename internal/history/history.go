@@ -55,6 +55,21 @@ type Conversation struct {
 	DisplayItems json.RawMessage `json:"display_items,omitempty"`
 	TokenUsage   TokenUsage      `json:"token_usage,omitempty"`
 	Summary      *Summary        `json:"summary,omitempty"`
+	Timeline     []ToolRecord    `json:"timeline,omitempty"`
+}
+
+// ToolRecord is one tool call as shown in the timeline. Arguments and results
+// are redacted and shortened.
+type ToolRecord struct {
+	ID         string    `json:"id"`
+	RunID      string    `json:"run_id"`
+	Tool       string    `json:"tool"`
+	Status     string    `json:"status"`
+	Permission string    `json:"permission,omitempty"`
+	Started    time.Time `json:"started"`
+	Millis     int64     `json:"millis"`
+	Args       string    `json:"args"`
+	Result     string    `json:"result"`
 }
 
 // Summary condenses the first Covered messages for the model. The messages

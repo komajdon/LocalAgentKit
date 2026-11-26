@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 
 	"agent-gui/domain"
 	"agent-gui/internal/config"
+	"agent-gui/internal/diag"
 	"agent-gui/internal/history"
 	"agent-gui/internal/permission"
 	"agent-gui/internal/recorder"
@@ -55,6 +57,7 @@ type App struct {
 
 	ledger *usage.Ledger
 	models modelCache
+	log    *slog.Logger // set before the UI can call in
 
 	recMu  sync.Mutex
 	recSes *recorder.Session
@@ -68,7 +71,7 @@ type App struct {
 func NewApp() *App {
 	// Without a store this cannot fail; startup reloads persisted grants.
 	m, _ := permission.NewManager(nil)
-	a := &App{permissions: m, providerFor: newProvider, mcp: tools.NewMCPPool(), ledger: usage.NewLedger(usageStore{})}
+	a := &App{permissions: m, providerFor: newProvider, mcp: tools.NewMCPPool(), ledger: usage.NewLedger(usageStore{}), log: diag.Discard()}
 	a.emit = func(name string, data any) { runtime.EventsEmit(a.ctx, name, data) }
 	a.logf = func(format string, args ...any) { runtime.LogErrorf(a.ctx, format, args...) }
 	return a
@@ -91,6 +94,12 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}
 	a.cfg = config.Load()
+	log, err := diag.Open(logDir())
+	if err != nil {
+		runtime.LogErrorf(ctx, "logging is off: %v", err)
+	}
+	a.log = log
+	a.log.Info("start", "version", Version)
 	m, err := permission.NewManager(grantStore{})
 	if err != nil {
 		runtime.LogErrorf(ctx, "saved approvals could not be read; you will be asked again: %v", err)

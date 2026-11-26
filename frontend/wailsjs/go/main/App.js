@@ -26,6 +26,10 @@ export function ExportConversation(arg1, arg2) {
   return window['go']['main']['App']['ExportConversation'](arg1, arg2);
 }
 
+export function ExportDiagnostics() {
+  return window['go']['main']['App']['ExportDiagnostics']();
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
@@ -56,6 +60,10 @@ export function GetSandboxStatus() {
 
 export function GetStartupError() {
   return window['go']['main']['App']['GetStartupError']();
+}
+
+export function GetToolTimeline(arg1) {
+  return window['go']['main']['App']['GetToolTimeline'](arg1);
 }
 
 export function GetUsageReport(arg1) {

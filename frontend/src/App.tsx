@@ -8,12 +8,13 @@ import {
   DeleteConversation, UpdateConversationPath, RenameConversation,
   SearchConversations, ExportConversation, SetConversationModel,
   TruncateAndResend, SetConversationPinned, SetConversationTags,
-  ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, GetRunState, GetMCPStatus, RestartMCPServer, SaveConfig, PickDirectory,
+  ListModels, ListTools, GetConfig, GetSandboxStatus, GetStartupError, ExportDiagnostics, GetRunState, GetMCPStatus, RestartMCPServer, SaveConfig, PickDirectory,
   WhisperAvailable, StartRecording, StopRecording,
   ListMCPServers, ProbeMCPServer,
   CheckForUpdate, GetVersion, ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation,
   GetContextUsage, BranchConversation, ImportConversation,
 } from '../wailsjs/go/main/App'
+import { ToolTimeline } from './components/ToolTimeline'
 import { ModelSettingsPanel } from './components/ModelSettingsPanel'
 import { UsageDashboard } from './components/UsageDashboard'
 import { EventsOn } from '../wailsjs/runtime/runtime'
@@ -82,6 +83,9 @@ interface Cfg {
   tool_calling: string
   backup_retention: number
   context_strategy: string
+  max_rounds: number
+  max_parallel_tools: number
+  tool_timeout_seconds: number
   sandbox_network: boolean
   search_api_key: string
   theme: string
@@ -135,6 +139,7 @@ export default function App() {
   const [input, setInput]     = useState('')
   // The single run may belong to a conversation other than the one shown.
   const [showUsage, setShowUsage] = useState(false)
+  const [showTimeline, setShowTimeline] = useState(false)
   const [convLimit, setConvLimit] = useState(CONV_PAGE)
   const [runConv, setRunConv] = useState<string | null>(null)
   const running = runConv !== null && runConv === activeId
@@ -228,7 +233,7 @@ export default function App() {
     mcp_servers: [], notifications: true,
     search_provider: 'duckduckgo', search_api_key: '',
     theme: 'dark',
-    sandbox_mode: 'auto', sandbox_network: false, tool_calling: 'auto', backup_retention: 7, context_strategy: 'sliding',
+    sandbox_mode: 'auto', sandbox_network: false, tool_calling: 'auto', backup_retention: 7, context_strategy: 'sliding', max_rounds: 0, max_parallel_tools: 0, tool_timeout_seconds: 0,
   })
 
   // Isolation actually applied to shell commands under the saved settings.
@@ -968,6 +973,7 @@ export default function App() {
           ) : (
             <>
               <button className="foot-btn" onClick={() => setShowUsage(true)}>📊 Usage</button>
+            <button className="foot-btn" onClick={() => setShowTimeline(true)} disabled={!activeId}>🧭 Tool timeline</button>
               <button className="foot-btn" onClick={() => { setShowCfg(true); setCfgTab('general') }}
                 aria-label="Settings">⚙️ Settings</button>
               <div className="conn-badge">
@@ -1263,6 +1269,8 @@ export default function App() {
       )}
 
       {/* ── Permission request modal ── */}
+      {showTimeline && activeId && <ToolTimeline conversationId={activeId} onClose={() => setShowTimeline(false)} />}
+
       {showUsage && <UsageDashboard conversations={convList} onClose={() => setShowUsage(false)} />}
 
       {permReq && (
@@ -1622,6 +1630,24 @@ export default function App() {
                     onChange={e => setCfg(c => ({ ...c, context_limit: Number(e.target.value) }))}
                   />
                   <div className="field-hint">Approximate size of what is sent to the model (default: 8192). History is never deleted.</div>
+                </div>
+
+                <div className="field">
+                  <label>Execution limits per run (0 = default)</label>
+                  <div className="usage-grid">
+                    {([['max_rounds', 'Model rounds (50)'], ['max_parallel_tools', 'Tools at once (4)'], ['tool_timeout_seconds', 'Seconds per tool (360)']] as const).map(([k, label]) => (
+                      <label key={k}>{label}
+                        <input type="number" min={0} value={cfg[k] || 0}
+                          onChange={e => setCfg(c => ({ ...c, [k]: Math.max(0, Number(e.target.value)) }))} />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label>Diagnostics</label>
+                  <button className="btn secondary" onClick={() => ExportDiagnostics().then(r => setBackupMsg(r === 'ok' ? '✓ Diagnostics saved' : r ? '✗ ' + r : ''))}>Export diagnostics…</button>
+                  <div className="field-hint">Versions, settings without keys or addresses, MCP state and the app log. No conversation content. Nothing is sent anywhere.</div>
                 </div>
 
                 <div className="field">

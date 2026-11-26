@@ -110,6 +110,7 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 		if repeats >= maxRepeats {
 			for _, p := range pending {
 				p.execute, p.result = false, "ERROR: not run: this call was repeated "+fmt.Sprint(maxRepeats)+" times"
+				p.status = ToolRejected
 			}
 		}
 
@@ -118,6 +119,18 @@ func (a *ConversationalAgent) Chat(ctx context.Context, userInput string) error 
 		// Emit results and append to history in the original call order so the
 		// conversation stays deterministic regardless of completion order.
 		for _, p := range pending {
+			status := p.status
+			if p.execute {
+				switch {
+				case ctx.Err() != nil:
+					status = ToolCanceled
+				case failed(p.result):
+					status = ToolFailed
+				default:
+					status = ToolSucceeded
+				}
+			}
+			a.toolEvent(p, status)
 			if a.OnToolResult != nil {
 				a.OnToolResult(p.tc.Tool, p.result)
 			}
@@ -207,11 +220,12 @@ func (a *ConversationalAgent) collectCalls(ctx context.Context, calls []domain.T
 	var pending []*pendingCall
 	for _, call := range calls {
 		tc := &call
-		p := &pendingCall{tc: tc}
+		a.callSeq++
+		p := &pendingCall{tc: tc, id: fmt.Sprintf("t%d", a.callSeq), status: ToolRejected}
 		pending = append(pending, p)
 
 		if ctx.Err() != nil {
-			p.result = canceledResult
+			p.result, p.status = canceledResult, ToolCanceled
 			continue
 		}
 		if tc.Malformed != "" {
@@ -235,17 +249,21 @@ func (a *ConversationalAgent) collectCalls(ctx context.Context, calls []domain.T
 		tc.Args = args
 		if a.OnPermissionRequest != nil {
 			allowed := a.OnPermissionRequest(PermissionRequest{
+				Outcome:         &p.permission,
 				Tool:            tc.Tool,
 				Description:     tool.Description(),
 				Args:            tc.Args,
 				ExternalContent: hasExternalContent(a.conv.History()),
 			})
+			if p.permission == "" {
+				p.permission = map[bool]string{true: "allowed", false: "denied"}[allowed]
+			}
 			if ctx.Err() != nil {
-				p.result = canceledResult
+				p.result, p.status = canceledResult, ToolCanceled
 				continue
 			}
 			if !allowed {
-				p.result = "PERMISSION DENIED by user"
+				p.result, p.status = "PERMISSION DENIED by user", ToolDenied
 				continue
 			}
 		}
@@ -260,15 +278,26 @@ func (a *ConversationalAgent) collectCalls(ctx context.Context, calls []domain.T
 // execute runs the approved calls with bounded parallelism and a deadline each.
 func (a *ConversationalAgent) execute(ctx context.Context, pending []*pendingCall) {
 	var wg sync.WaitGroup
-	slots := make(chan struct{}, maxParallelTools)
+	parallel, timeout := a.MaxParallel, a.ToolTimeout
+	if parallel <= 0 {
+		parallel = maxParallelTools
+	}
+	if timeout <= 0 {
+		timeout = toolTimeout
+	}
+	slots := make(chan struct{}, parallel)
 	for _, p := range pending {
 		if !p.execute {
 			continue
 		}
 		wg.Add(1)
 		slots <- struct{}{}
+		p.started = time.Now()
+		a.toolEvent(p, ToolRunning)
 		go func(p *pendingCall) {
+			start := time.Now()
 			defer func() {
+				p.took = time.Since(start)
 				// A panicking tool must not take the application down.
 				if r := recover(); r != nil {
 					p.result = fmt.Sprintf("ERROR: tool crashed: %v", r)
@@ -280,7 +309,7 @@ func (a *ConversationalAgent) execute(ctx context.Context, pending []*pendingCal
 				p.result = canceledResult
 				return
 			}
-			toolCtx, cancel := context.WithTimeout(ctx, toolTimeout)
+			toolCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			p.result = p.tool.Execute(toolCtx, p.tc.Args)
 		}(p)

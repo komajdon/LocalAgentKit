@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"agent-gui/domain"
 )
@@ -13,6 +14,12 @@ type pendingCall struct {
 	tool    domain.Tool
 	result  string
 	execute bool
+
+	id         string
+	status     string // final state of a call that is not executed
+	permission string
+	started    time.Time
+	took       time.Duration
 }
 
 // PermissionRequest is sent to the UI before any tool execution.
@@ -23,6 +30,8 @@ type PermissionRequest struct {
 	// ExternalContent is true when the conversation holds output from the web,
 	// a document or an MCP server, which may carry injected instructions.
 	ExternalContent bool `json:"external_content"`
+	// Outcome may be set by the checker to say how the call was decided.
+	Outcome *string `json:"-"`
 }
 
 // RequestUsage is what one model request consumed. Estimated is set when the
@@ -77,8 +86,14 @@ type ConversationalAgent struct {
 	BeforeRequest func() error
 	// OnRequest reports what each model request consumed.
 	OnRequest func(RequestUsage)
-	// MaxRounds limits model requests per run; 0 means the default.
-	MaxRounds int
+	// MaxRounds limits model requests per run, ToolTimeout one tool call and
+	// MaxParallel the tools run at once; 0 means the default.
+	MaxRounds   int
+	ToolTimeout time.Duration
+	MaxParallel int
+	// OnToolEvent follows each tool call.
+	OnToolEvent func(ToolEvent)
+	callSeq     int
 	// OnWarning reports a non-fatal problem to the user.
 	OnWarning func(string)
 	// Strategy and Summary control how old turns are condensed.

@@ -1213,3 +1213,9 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible), select:focus:
 .usage-table th, .usage-table td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--border2); white-space: nowrap; }
 .usage-table th:nth-child(-n+4), .usage-table td:nth-child(-n+4) { text-align: left; }
 .usage-table input { width: 100%; min-width: 80px; }
+.timeline-row { border: 1px solid var(--border2); border-radius: 8px; padding: 6px 10px; margin-top: 6px; font-size: 12px; color: var(--text); }
+.timeline-row summary { display: flex; gap: 12px; flex-wrap: wrap; cursor: pointer; }
+.timeline-row pre { white-space: pre-wrap; max-height: 220px; overflow: auto; }
+.timeline-status { font-weight: 700; }
+.timeline-status.succeeded { color: var(--green); }
+.timeline-status.failed, .timeline-status.denied, .timeline-status.rejected { color: var(--red); }

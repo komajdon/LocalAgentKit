@@ -43,6 +43,10 @@ func sandboxOptions(cfg configSnapshot) sandbox.Options {
 	return sandbox.Options{Mode: sandbox.Mode(cfg.SandboxMode), AllowNetwork: cfg.SandboxNetwork}
 }
 
+func sandboxStatusLine(cfg configSnapshot) string {
+	return sandbox.Probe(sandboxOptions(cfg)).String()
+}
+
 // GetSandboxStatus reports the isolation shell commands currently get.
 func (a *App) GetSandboxStatus() sandbox.Status {
 	return sandbox.Probe(sandboxOptions(a.config()))

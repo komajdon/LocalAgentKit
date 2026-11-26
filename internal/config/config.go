@@ -73,6 +73,10 @@ type Config struct {
 	BackupRetention int `json:"backup_retention"`
 	// ContextStrategy: sliding (default) | summary | hybrid.
 	ContextStrategy string `json:"context_strategy"`
+	// Execution limits per run; 0 means the built-in default.
+	MaxRounds          int `json:"max_rounds"`
+	MaxParallelTools   int `json:"max_parallel_tools"`
+	ToolTimeoutSeconds int `json:"tool_timeout_seconds"`
 }
 
 func Default() Config {

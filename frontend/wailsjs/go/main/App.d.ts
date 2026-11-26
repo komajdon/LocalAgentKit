@@ -21,6 +21,8 @@ export function ExportBackup(arg1:string):Promise<string>;
 
 export function ExportConversation(arg1:string,arg2:string):Promise<string>;
 
+export function ExportDiagnostics():Promise<string>;
+
 export function GetConfig():Promise<config.Config>;
 
 export function GetContextUsage():Promise<app.ContextUsage>;
@@ -36,6 +38,8 @@ export function GetRunState():Promise<main.RunState>;
 export function GetSandboxStatus():Promise<sandbox.Status>;
 
 export function GetStartupError():Promise<string>;
+
+export function GetToolTimeline(arg1:string):Promise<Array<history.ToolRecord>>;
 
 export function GetUsageReport(arg1:usage.Filter):Promise<usage.Report>;
 

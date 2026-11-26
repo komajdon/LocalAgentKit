@@ -98,6 +98,13 @@ func backoff(attempt int) time.Duration {
 	return d/2 + rand.N(d/2+1)
 }
 
+type retryKey struct{}
+
+// OnRetry returns a context whose requests report each retry to observe.
+func OnRetry(ctx context.Context, observe func(attempt int, err error)) context.Context {
+	return context.WithValue(ctx, retryKey{}, observe)
+}
+
 // withRetry runs fn until it succeeds, fails permanently or runs out of
 // attempts. emitted reports whether fn has already shown output to the caller;
 // once it has, retrying would repeat that output, so the error is returned.
@@ -120,6 +127,9 @@ func withRetry(ctx context.Context, emitted func() bool, fn func() error) error 
 				return err
 			}
 			delay = httpErr.RetryAfter
+		}
+		if observe, ok := ctx.Value(retryKey{}).(func(int, error)); ok {
+			observe(attempt+1, err)
 		}
 		select {
 		case <-ctx.Done():

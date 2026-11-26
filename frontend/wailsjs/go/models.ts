@@ -67,6 +67,9 @@ export namespace config {
 	    tool_calling: string;
 	    backup_retention: number;
 	    context_strategy: string;
+	    max_rounds: number;
+	    max_parallel_tools: number;
+	    tool_timeout_seconds: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -93,6 +96,9 @@ export namespace config {
 	        this.tool_calling = source["tool_calling"];
 	        this.backup_retention = source["backup_retention"];
 	        this.context_strategy = source["context_strategy"];
+	        this.max_rounds = source["max_rounds"];
+	        this.max_parallel_tools = source["max_parallel_tools"];
+	        this.tool_timeout_seconds = source["tool_timeout_seconds"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -209,6 +215,53 @@ export namespace history {
 		    return a;
 		}
 	}
+	export class ToolRecord {
+	    id: string;
+	    run_id: string;
+	    tool: string;
+	    status: string;
+	    permission?: string;
+	    // Go type: time
+	    started: any;
+	    millis: number;
+	    args: string;
+	    result: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.run_id = source["run_id"];
+	        this.tool = source["tool"];
+	        this.status = source["status"];
+	        this.permission = source["permission"];
+	        this.started = this.convertValues(source["started"], null);
+	        this.millis = source["millis"];
+	        this.args = source["args"];
+	        this.result = source["result"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class Summary {
 	    text: string;
 	    covered: number;
@@ -290,6 +343,7 @@ export namespace history {
 	    display_items?: number[];
 	    token_usage?: TokenUsage;
 	    summary?: Summary;
+	    timeline?: ToolRecord[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Conversation(source);
@@ -309,6 +363,7 @@ export namespace history {
 	        this.display_items = source["display_items"];
 	        this.token_usage = this.convertValues(source["token_usage"], TokenUsage);
 	        this.summary = this.convertValues(source["summary"], Summary);
+	        this.timeline = this.convertValues(source["timeline"], ToolRecord);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -329,6 +384,7 @@ export namespace history {
 		    return a;
 		}
 	}
+	
 	
 	
 
@@ -381,6 +437,7 @@ export namespace main {
 	    display_items?: number[];
 	    token_usage?: history.TokenUsage;
 	    summary?: history.Summary;
+	    timeline?: history.ToolRecord[];
 	    running: boolean;
 	    seq: number;
 	
@@ -402,6 +459,7 @@ export namespace main {
 	        this.display_items = source["display_items"];
 	        this.token_usage = this.convertValues(source["token_usage"], history.TokenUsage);
 	        this.summary = this.convertValues(source["summary"], history.Summary);
+	        this.timeline = this.convertValues(source["timeline"], history.ToolRecord);
 	        this.running = source["running"];
 	        this.seq = source["seq"];
 	    }

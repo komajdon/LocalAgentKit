@@ -24,6 +24,7 @@ import (
 	"agent-gui/domain"
 	"agent-gui/internal/history"
 	"agent-gui/internal/store"
+	"agent-gui/llm"
 	"agent-gui/tools"
 )
 
@@ -62,6 +63,7 @@ type run struct {
 	base      []displayItem // transcript up to and including this turn's input
 	turn      []displayItem // completed items of this turn
 	streaming strings.Builder
+	tools     []history.ToolRecord
 	usage     *appLayer.ContextUsage
 	discard   bool // the conversation was deleted
 }
@@ -238,6 +240,23 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 			r.turn = append(r.turn, displayItem{Type: "tool", Data: map[string]any{"kind": "result", "tool": name, "body": result}})
 		})
 	}
+	log := a.log.With("run_id", r.id, "conversation_id", r.convID, "provider", cfg.Provider, "model", profile.Model)
+	log.Info("run_start")
+	agent.MaxRounds = cfg.MaxRounds
+	agent.MaxParallel = cfg.MaxParallelTools
+	agent.ToolTimeout = time.Duration(cfg.ToolTimeoutSeconds) * time.Second
+	agent.OnToolEvent = func(e appLayer.ToolEvent) {
+		record := toolRecord(r.id, e)
+		a.emitRun(r, "chat:tool_event", record, func() { r.tools = upsert(r.tools, record) })
+		if e.Status != appLayer.ToolRunning {
+			log.Info("tool", "tool", e.Tool, "status", e.Status, "permission", e.Permission, "millis", record.Millis)
+		}
+	}
+	retries := 0
+	ctx := llm.OnRetry(r.ctx, func(attempt int, err error) {
+		retries++
+		log.Warn("retry", "attempt", attempt, "error", err)
+	})
 	agent.OnContextUsage = func(usage appLayer.ContextUsage) {
 		a.emitRun(r, "chat:context_usage", usage, func() { r.usage = &usage })
 	}
@@ -251,10 +270,35 @@ func (a *App) runAgent(r *run, prior *history.Conversation, text string) {
 		})
 	}
 	m := a.newMeter(string(cfg.Provider), profile.Model, r.convID, warn)
-	agent.BeforeRequest, agent.OnRequest, agent.OnWarning = m.before, m.record, warn
+	var requestStarted time.Time
+	agent.BeforeRequest = func() error {
+		requestStarted = time.Now()
+		return m.before()
+	}
+	agent.OnRequest = func(u appLayer.RequestUsage) {
+		log.Info("request", "millis", time.Since(requestStarted).Milliseconds(),
+			"input", u.Input, "output", u.Output, "estimated", u.Estimated)
+		m.record(u)
+	}
+	agent.OnWarning = warn
 
 	a.emitRun(r, "chat:thinking", nil, nil)
-	err := agent.Chat(r.ctx, text)
+	started := time.Now()
+	err := agent.Chat(ctx, text)
+	reason := appLayer.EndReason(err)
+	switch {
+	case r.ctx.Err() != nil:
+		reason = appLayer.EndCanceled
+	case errors.Is(err, errBudget):
+		reason = "usage_limit"
+	}
+	attrs := []any{"reason", reason, "millis", time.Since(started).Milliseconds(), "retries", retries}
+	// Provider errors can quote the request, so only other errors are logged.
+	var httpErr *llm.HTTPError
+	if errors.As(err, &httpErr) {
+		attrs = append(attrs, "http_status", httpErr.Status)
+	}
+	log.Info("run_end", attrs...)
 	a.finishRun(r, agent, err)
 }
 
@@ -278,6 +322,7 @@ func (a *App) finishRun(r *run, agent *appLayer.ConversationalAgent, runErr erro
 	r.mu.Lock()
 	discard := r.discard
 	items := append(append([]displayItem{}, r.base...), r.turn...)
+	toolRecords := r.tools
 	if r.streaming.Len() > 0 {
 		items = append(items, msgItem("assistant", r.streaming.String(), false))
 	}
@@ -302,6 +347,10 @@ func (a *App) finishRun(r *run, agent *appLayer.ConversationalAgent, runErr erro
 		}
 		prompt, completion := agent.Usage()
 		conv.TokenUsage = history.TokenUsage{PromptTokens: prompt, CompletionTokens: completion}
+		conv.Timeline = append(conv.Timeline, toolRecords...)
+		if extra := len(conv.Timeline) - maxToolRecords; extra > 0 {
+			conv.Timeline = conv.Timeline[extra:]
+		}
 		conv.Summary = nil
 		if s := agent.Summary; s != nil {
 			conv.Summary = &history.Summary{Text: s.Text, Covered: s.Covered}

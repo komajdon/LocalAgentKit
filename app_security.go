@@ -60,11 +60,18 @@ func (a *App) authorize(ctx context.Context, conversationID, workspace string, r
 	setting := string(a.cfg.ToolPermissions[req.Tool])
 	a.mu.Unlock()
 
+	outcome := func(s string) {
+		if req.Outcome != nil {
+			*req.Outcome = s
+		}
+	}
 	switch a.permissions.Check(setting, workspace, req.Tool, req.Args, req.ExternalContent) {
 	case permission.Allow:
+		outcome("allowed by saved setting or approval")
 		a.emit("chat:tool_auto_allowed", req.Tool)
 		return true
 	case permission.Deny:
+		outcome("denied by setting")
 		a.emit("chat:tool_auto_denied", req.Tool)
 		return false
 	}
@@ -104,8 +111,10 @@ func (a *App) authorize(ctx context.Context, conversationID, workspace string, r
 	a.emit("chat:permission_closed", pending.id)
 
 	if scope == "" {
+		outcome("denied at the prompt")
 		return false
 	}
+	outcome("approved: " + string(scope))
 	if err := a.permissions.Remember(scope, workspace, req.Tool, req.Args); err != nil {
 		// The call itself was approved; only remembering it failed.
 		a.logf("could not save approval: %v", err)
