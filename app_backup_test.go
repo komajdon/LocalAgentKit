@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"agent-gui/internal/backup"
+	"agent-gui/internal/config"
 	"agent-gui/internal/history"
 )
 
@@ -14,17 +15,17 @@ func TestAutoBackupExcludesKeyAndPrunes(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for i := 0; i < maxBackupArchives; i++ {
+	for i := 0; i < config.DefaultBackupRetention; i++ {
 		name := filepath.Join(dir, "backup-2000-01-0"+string(rune('1'+i))+"_000000.tar.gz")
 		if err := backup.WritePlain(name, []byte("old")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := writeAutoBackup(dir); err != nil {
+	if err := writeAutoBackup(dir, config.DefaultBackupRetention); err != nil {
 		t.Fatal(err)
 	}
 	all, _ := filepath.Glob(filepath.Join(dir, "backup-*.tar.gz"))
-	if len(all) != maxBackupArchives {
+	if len(all) != config.DefaultBackupRetention {
 		t.Fatalf("kept %d", len(all))
 	}
 	files, err := backup.Read(all[len(all)-1], "")

@@ -56,72 +56,72 @@ type Conversation struct {
 	TokenUsage   TokenUsage      `json:"token_usage,omitempty"`
 }
 
-// List returns metadata for all conversations, sorted newest-first.
-func List() ([]ConvMeta, error) {
-	var metas []ConvMeta
-	err := store.Scan(bucket, func(_ string, raw []byte) error {
-		var c Conversation
-		if err := json.Unmarshal(raw, &c); err != nil {
-			return nil
+func sortNewestFirst(metas []ConvMeta) {
+	sort.Slice(metas, func(i, j int) bool {
+		if !metas[i].UpdatedAt.Equal(metas[j].UpdatedAt) {
+			return metas[i].UpdatedAt.After(metas[j].UpdatedAt)
 		}
-		metas = append(metas, c.ConvMeta)
-		return nil
+		return metas[i].ID > metas[j].ID
 	})
+}
+
+// List returns metadata for all conversations, newest first, from the index.
+func List() ([]ConvMeta, error) {
+	entries, err := index()
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(metas, func(i, j int) bool {
-		return metas[i].UpdatedAt.After(metas[j].UpdatedAt)
-	})
+	var metas []ConvMeta
+	for _, e := range entries {
+		metas = append(metas, e.ConvMeta)
+	}
+	sortNewestFirst(metas)
 	return metas, nil
 }
 
-// Search returns conversations whose title or message content contains query (case-insensitive).
+// Search returns conversations whose title, tags or message content contain
+// query, ignoring case. Conversations are decrypted only when the title and
+// tags do not already match.
 func Search(query string) ([]ConvMeta, error) {
 	if query == "" {
 		return List()
 	}
 	q := strings.ToLower(query)
-	var results []ConvMeta
-
-	err := store.Scan(bucket, func(_ string, raw []byte) error {
-		var c Conversation
-		if err := json.Unmarshal(raw, &c); err != nil {
-			return nil
-		}
-		if strings.Contains(strings.ToLower(c.Title), q) {
-			results = append(results, c.ConvMeta)
-			return nil
-		}
-		for _, m := range c.Messages {
-			if strings.Contains(strings.ToLower(m.Content), q) {
-				results = append(results, c.ConvMeta)
-				return nil
-			}
-		}
-		return nil
-	})
+	entries, err := index()
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].UpdatedAt.After(results[j].UpdatedAt)
-	})
+	var results []ConvMeta
+	for key, e := range entries {
+		if strings.Contains(strings.ToLower(e.Title+"\x00"+strings.Join(e.Tags, "\x00")), q) {
+			results = append(results, e.ConvMeta)
+			continue
+		}
+		c, err := Load(key)
+		if err != nil {
+			continue
+		}
+		for _, m := range c.Messages {
+			if strings.Contains(strings.ToLower(m.Content), q) {
+				results = append(results, e.ConvMeta)
+				break
+			}
+		}
+	}
+	sortNewestFirst(results)
 	return results, nil
 }
 
-// TotalUsage sums cumulative token usage across every conversation — the basis
-// for the shared account-wide usage budget.
+// TotalUsage sums cumulative token usage across every conversation.
 func TotalUsage() (promptTokens, completionTokens int64) {
-	_ = store.Scan(bucket, func(_ string, raw []byte) error {
-		var c Conversation
-		if err := json.Unmarshal(raw, &c); err != nil {
-			return nil
-		}
-		promptTokens += int64(c.TokenUsage.PromptTokens)
-		completionTokens += int64(c.TokenUsage.CompletionTokens)
-		return nil
-	})
+	entries, err := index()
+	if err != nil {
+		return 0, 0
+	}
+	for _, e := range entries {
+		promptTokens += int64(e.TokenUsage.PromptTokens)
+		completionTokens += int64(e.TokenUsage.CompletionTokens)
+	}
 	return promptTokens, completionTokens
 }
 
@@ -136,12 +136,12 @@ func Load(id string) (*Conversation, error) {
 
 // Save persists a conversation to the encrypted store.
 func Save(c *Conversation) error {
-	return store.Put(bucket, c.ID, c)
+	return store.PutIndexed(bucket, indexBucket, c.ID, c, func(hash string) any { return entryFor(c, hash) })
 }
 
 // Delete removes a conversation by ID.
 func Delete(id string) error {
-	return store.Delete(bucket, id)
+	return store.DeleteIndexed(bucket, indexBucket, id)
 }
 
 // Export returns the conversation as Markdown, plain text, or JSON.

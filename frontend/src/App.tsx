@@ -47,6 +47,7 @@ type Item =
 interface ChatEvent { conversation_id: string; run_id: string; seq: number; data: any }
 const CHAT_EVENTS = ['started', 'thinking', 'chunk', 'assistant', 'tool_call', 'tool_result', 'context_usage', 'done', 'stopped', 'error']
 const FINAL_EVENTS = ['done', 'stopped', 'error']
+const CONV_PAGE = 100
 
 // Stored transcript items keep their text under data; the view does not for
 // error and status rows.
@@ -77,6 +78,7 @@ interface Cfg {
   search_provider: string
   sandbox_mode: string
   tool_calling: string
+  backup_retention: number
   sandbox_network: boolean
   search_api_key: string
   theme: string
@@ -137,6 +139,7 @@ export default function App() {
   const [items, setItems]     = useState<Item[]>([])
   const [input, setInput]     = useState('')
   // The single run may belong to a conversation other than the one shown.
+  const [convLimit, setConvLimit] = useState(CONV_PAGE)
   const [runConv, setRunConv] = useState<string | null>(null)
   const running = runConv !== null && runConv === activeId
   const busy = runConv !== null
@@ -231,7 +234,7 @@ export default function App() {
     mcp_servers: [], notifications: true,
     search_provider: 'duckduckgo', search_api_key: '',
     theme: 'dark',
-    sandbox_mode: 'auto', sandbox_network: false, tool_calling: 'auto',
+    sandbox_mode: 'auto', sandbox_network: false, tool_calling: 'auto', backup_retention: 7,
     budget_data_gb: 50, budget_fund: 50, fund_per_mtokens: 1,
   })
 
@@ -804,7 +807,10 @@ export default function App() {
   // ── Render ───────────────────────────────────────────────
 
   const allTags = Array.from(new Set(convList.flatMap(c => c.tags || []))).sort()
-  const visibleConvs = tagFilter ? convList.filter(c => (c.tags || []).includes(tagFilter)) : convList
+  const matching = tagFilter ? convList.filter(c => (c.tags || []).includes(tagFilter)) : convList
+  // Large histories are rendered a page at a time; pinned ones always show.
+  const visibleConvs = matching.filter((c, i) => i < convLimit || c.pinned || c.id === activeId)
+  const hiddenConvs = matching.length - visibleConvs.length
   const groups = groupConvs(visibleConvs)
 
   const ConvGroup = ({ label, list }: { label: string; list: ConvMeta[] }) =>
@@ -950,6 +956,11 @@ export default function App() {
                     <ConvGroup label="Today" list={groups.today} />
                     <ConvGroup label="This week" list={groups.week} />
                     <ConvGroup label="Older" list={groups.older} />
+                    {hiddenConvs > 0 && searchResults === null && (
+                      <button className="btn secondary" onClick={() => setConvLimit(n => n + CONV_PAGE)}>
+                        Show more ({hiddenConvs})
+                      </button>
+                    )}
                   </>
               }
             </div>
@@ -1786,9 +1797,12 @@ export default function App() {
                   )}
                   <div className="field-hint">
                     Exports are encrypted with the passphrase, which cannot be recovered. Automatic backups
-                    in <code>data/backups/</code> (up to 7) contain no key, so they only restore while this
+                    in <code>data/backups/</code> contain no key, so they only restore while this
                     installation still has its key.
                   </div>
+                  <label htmlFor="backup-retention">Automatic backups to keep</label>
+                  <input id="backup-retention" type="number" min={1} max={100} value={cfg.backup_retention || 7}
+                    onChange={e => setCfg(c => ({ ...c, backup_retention: Number(e.target.value) }))} />
                 </div>
 
                 <div className="field">

@@ -9,11 +9,9 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"agent-gui/internal/backup"
+	"agent-gui/internal/config"
 	"agent-gui/internal/store"
 )
-
-// maxBackupArchives is how many automatic backups are kept.
-const maxBackupArchives = 7
 
 // snapshotBytes returns a consistent copy of the open database.
 func snapshotBytes() ([]byte, error) {
@@ -32,7 +30,10 @@ func snapshotBytes() ([]byte, error) {
 // writeAutoBackup saves a timestamped copy of the database, without the key,
 // in dir and prunes old ones. Old backups are only removed after the new one
 // was written.
-func writeAutoBackup(dir string) error {
+func writeAutoBackup(dir string, keep int) error {
+	if keep < 1 {
+		keep = config.DefaultBackupRetention
+	}
 	data, err := snapshotBytes()
 	if err != nil {
 		return err
@@ -49,7 +50,7 @@ func writeAutoBackup(dir string) error {
 		return err
 	}
 	sort.Strings(entries) // the timestamp format sorts oldest first
-	for len(entries) > maxBackupArchives {
+	for len(entries) > keep {
 		if err := os.Remove(entries[0]); err != nil {
 			return err
 		}

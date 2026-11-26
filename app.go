@@ -82,6 +82,14 @@ func (a *App) startup(ctx context.Context) {
 		a.startupErr = "Failed to open data store: " + err.Error()
 		runtime.EventsEmit(ctx, "app:fatal", a.startupErr)
 	}
+	if a.startupErr == "" {
+		if err := history.Migrate(filepath.Join(store.DataDir(), "backups")); err != nil {
+			// Nothing may be written to data this version cannot handle.
+			a.startupErr = "Failed to upgrade the data store: " + err.Error()
+			_ = store.Close()
+			runtime.EventsEmit(ctx, "app:fatal", a.startupErr)
+		}
+	}
 	a.cfg = config.Load()
 	m, err := permission.NewManager(grantStore{})
 	if err != nil {
@@ -107,7 +115,7 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	// After a restore was staged, keep the archives from before it intact.
 	if !restoring && a.startupErr == "" {
-		if err := writeAutoBackup(filepath.Join(store.DataDir(), "backups")); err != nil {
+		if err := writeAutoBackup(filepath.Join(store.DataDir(), "backups"), a.config().BackupRetention); err != nil {
 			runtime.LogErrorf(ctx, "automatic backup failed: %v", err)
 		}
 	}

@@ -64,6 +64,7 @@ export namespace config {
 	    sandbox_mode: string;
 	    sandbox_network: boolean;
 	    tool_calling: string;
+	    backup_retention: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -91,6 +92,7 @@ export namespace config {
 	        this.sandbox_mode = source["sandbox_mode"];
 	        this.sandbox_network = source["sandbox_network"];
 	        this.tool_calling = source["tool_calling"];
+	        this.backup_retention = source["backup_retention"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -74,6 +74,8 @@ type Config struct {
 	SandboxNetwork bool `json:"sandbox_network"`
 	// ToolCalling: auto (native when the model supports it) | text.
 	ToolCalling string `json:"tool_calling"`
+	// BackupRetention is how many automatic backups are kept.
+	BackupRetention int `json:"backup_retention"`
 }
 
 func Default() Config {
@@ -93,8 +95,12 @@ func Default() Config {
 		FundPerMTokens:  1,
 		SandboxMode:     "auto",
 		ToolCalling:     "auto",
+		BackupRetention: DefaultBackupRetention,
 	}
 }
+
+// DefaultBackupRetention applies when the setting is unset or invalid.
+const DefaultBackupRetention = 7
 
 // Load reads the config from the encrypted store.
 // Returns the default config if none has been saved yet.
@@ -124,6 +130,9 @@ func Load() Config {
 	}
 	if cfg.FundPerMTokens == 0 {
 		cfg.FundPerMTokens = 1
+	}
+	if cfg.BackupRetention < 1 {
+		cfg.BackupRetention = DefaultBackupRetention
 	}
 	if cfg.SandboxMode == "" {
 		cfg.SandboxMode = "auto"
