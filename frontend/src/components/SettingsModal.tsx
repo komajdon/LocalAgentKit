@@ -3,10 +3,15 @@ import {
   ListModels, SaveConfig,
 } from '../../wailsjs/go/main/App'
 import type { Dispatch, SetStateAction } from 'react'
-import { GeneralTab } from './settings/GeneralTab'
+import { GeneralTab, type Section } from './settings/GeneralTab'
 import { McpTab } from './settings/McpTab'
-import { PermissionsTab } from './settings/PermissionsTab'
+import { Icon, type IconName } from './Icon'
 import type { ToolInfo, MCPServer, Cfg } from '../types'
+
+const SECTIONS: [Section | 'mcp', string, IconName][] = [
+  ['model', 'Model', 'cpu'], ['agent', 'Agent', 'spark'], ['safety', 'Safety', 'shield'],
+  ['mcp', 'MCP servers', 'plug'], ['data', 'Data and privacy', 'database'], ['app', 'App', 'sun'],
+]
 
 interface Props {
   cfg: Cfg
@@ -23,7 +28,7 @@ interface Props {
 }
 
 export function SettingsModal({ cfg, setCfg, models, setModels, toolList, mcpServers, setMcpServers, whisperReady, appVersion, onImported, onClose }: Props) {
-  const [cfgTab, setCfgTab] = useState<'general' | 'permissions' | 'mcp'>('general')
+  const [cfgTab, setCfgTab] = useState<Section | 'mcp'>('model')
   const [savingCfg, setSavingCfg] = useState(false)
 
   const saveCfg = async () => {
@@ -44,36 +49,32 @@ export function SettingsModal({ cfg, setCfg, models, setModels, toolList, mcpSer
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const title = SECTIONS.find(([id]) => id === cfgTab)![1]
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-label="Settings">
-      <div className="modal">
+      <div className="modal settings">
         <div className="modal-hd">
-          <div className="modal-ico ico-cfg">⚙️</div>
-          <div><h2>Settings</h2></div>
+          <div><h2>Settings</h2><p>{title}</p></div>
+          <button className="icon-btn" onClick={onClose} aria-label="Close settings" title="Close (Esc)"><Icon name="x" /></button>
         </div>
-
-        <div style={{ padding: '0 22px 14px', flexShrink: 0 }}>
-          <div className="tabs">
-            <button className={`tab ${cfgTab === 'general' ? 'active' : ''}`} onClick={() => setCfgTab('general')}>General</button>
-            <button className={`tab ${cfgTab === 'permissions' ? 'active' : ''}`} onClick={() => setCfgTab('permissions')}>Permissions</button>
-            <button className={`tab ${cfgTab === 'mcp' ? 'active' : ''}`} onClick={() => setCfgTab('mcp')}>MCP Servers</button>
-          </div>
+        <div className="settings-main">
+          <nav className="settings-nav" aria-label="Settings sections">
+            {SECTIONS.map(([id, label, icon]) => (
+              <button key={id} className={`tab ${cfgTab === id ? 'active' : ''}`} aria-current={cfgTab === id} onClick={() => setCfgTab(id)}>
+                <Icon name={icon} /><span>{label}</span>
+              </button>
+            ))}
+          </nav>
+          {cfgTab === 'mcp'
+            ? <div className="settings-page"><McpTab mcpServers={mcpServers} setMcpServers={setMcpServers} /></div>
+            : <GeneralTab section={cfgTab} toolList={toolList} cfg={cfg} setCfg={setCfg} models={models} setModels={setModels}
+                whisperReady={whisperReady} appVersion={appVersion} onImported={onImported} />}
         </div>
-
-        {cfgTab === 'mcp' ? (
-          <McpTab mcpServers={mcpServers} setMcpServers={setMcpServers} />
-        ) : cfgTab === 'general' ? (
-          <GeneralTab cfg={cfg} setCfg={setCfg} models={models} setModels={setModels}
-            whisperReady={whisperReady} appVersion={appVersion} onImported={onImported} />
-        ) : (
-          <PermissionsTab cfg={cfg} setCfg={setCfg} toolList={toolList} />
-        )}
-
-            <div className="modal-ft">
-              <button className="btn secondary" onClick={onClose} disabled={savingCfg}>Cancel</button>
-              <button className="btn primary" onClick={saveCfg} disabled={savingCfg}>{savingCfg ? 'Saving…' : 'Save'}</button>
-            </div>
-          </div>
+        <div className="modal-ft">
+          <button className="btn" onClick={onClose} disabled={savingCfg}>Cancel</button>
+          <button className="btn primary" onClick={saveCfg} disabled={savingCfg}>{savingCfg ? 'Saving…' : 'Save'}</button>
         </div>
+      </div>
+    </div>
   )
 }

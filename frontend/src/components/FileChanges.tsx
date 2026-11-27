@@ -1,3 +1,4 @@
+import { Icon } from './Icon'
 import { useCallback, useEffect, useState } from 'react'
 import { GetGitStatus, ListFileChanges, UndoFileChange } from '../../wailsjs/go/main/App'
 import { DiffView } from './DiffView'
@@ -30,10 +31,10 @@ export function FileChanges({ conversationId, onClose }: { conversationId: strin
   }
 
   return (
-    <div className="overlay" role="dialog" aria-modal="true" aria-label="File changes">
-      <div className="modal wide">
+    <aside className="drawer" role="dialog" aria-label="File changes">
         <div className="modal-hd">
-          <div><h2>File changes</h2><p>Made by the agent's write and delete tools. Shell commands are not tracked.</p></div>
+          <div><h2>File changes</h2><p>By the write and delete tools. Shell commands are not tracked.</p></div>
+          <button className="icon-btn" onClick={onClose} aria-label="Close panel" title="Close (Esc)"><Icon name="x" /></button>
         </div>
         <div className="modal-body">
           {git?.repository && (
@@ -59,8 +60,6 @@ export function FileChanges({ conversationId, onClose }: { conversationId: strin
             </details>
           ))}
         </div>
-        <div className="modal-ft"><button className="btn secondary" onClick={onClose}>Close</button></div>
-      </div>
-    </div>
+    </aside>
   )
 }

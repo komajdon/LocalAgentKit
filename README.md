@@ -31,6 +31,18 @@ A local-first desktop AI agent with tool use, voice input, MCP support, and pers
 
 ---
 
+## Keyboard shortcuts
+
+| Keys | Action |
+|---|---|
+| Ctrl/Cmd + N | New conversation |
+| Ctrl/Cmd + K | Search conversations |
+| Ctrl/Cmd + , | Settings |
+| Enter / Shift + Enter | Send / new line |
+| Esc | Close the open panel or dialog; in an approval request, deny |
+
+---
+
 ## Download
 
 Pre-built binaries are on the [Releases](../../releases) page.

@@ -43,5 +43,8 @@ See `docs/UPGRADING.md` for behaviour changes and downgrade steps.
 - Go and frontend tests, ESLint, and CI quality gates.
 
 ### Changed
+- Redesigned interface: tool calls fold into rows, activity and file changes
+  are side panels, settings are in sections, the approval dialog leads with the
+  change, and Escape denies it. New light and dark themes.
 - `app.go` and `App.tsx` split into smaller files.
 - React 19, Vite 6, TypeScript 6.

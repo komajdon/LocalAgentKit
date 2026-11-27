@@ -24,7 +24,8 @@ internal/
   diff/, diag/     Unified diffs; structured log
   config/, recorder/, whisper/
 frontend/src/      React 19 + TypeScript (Vite)
-  components/      Views and dialogs; settings/ has one file per tab
+  components/      Views and dialogs; chat/ (header, transcript, composer),
+                   settings/; Icon.tsx is the icon set, style.css the design system
   hooks/           useChatStream (event routing), useSpeech
 ```
 

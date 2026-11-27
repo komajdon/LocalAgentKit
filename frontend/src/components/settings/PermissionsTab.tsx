@@ -22,8 +22,9 @@ export function PermissionsTab({ cfg, setCfg, toolList }: Props) {
     setCfg(c => ({ ...c, tool_permissions: { ...c.tool_permissions, [tool]: perm } }))
 
   return (
-      <div className="modal-body">
-        <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.7 }}>
+      <>
+        <span className="field-label">Tool permissions</span>
+        <div className="field-hint">
           Set a default permission for each tool. <strong style={{ color: 'var(--text)' }}>Always Ask</strong> prompts you each time,{' '}
           <strong style={{ color: 'var(--green)' }}>Always Allow</strong> skips the prompt,{' '}
           <strong style={{ color: 'var(--red)' }}>Always Deny</strong> blocks the tool silently.
@@ -66,6 +67,6 @@ export function PermissionsTab({ cfg, setCfg, toolList }: Props) {
             <button className="btn danger" onClick={() => RevokeAllPermissionGrants().then(refreshGrants)}>Revoke all</button>
           )}
         </div>
-      </div>
+      </>
   )
 }

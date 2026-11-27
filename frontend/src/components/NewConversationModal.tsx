@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Icon } from './Icon'
 import { PickDirectory, RecentWorkDirs } from '../../wailsjs/go/main/App'
 
 interface Props {
@@ -24,19 +25,19 @@ export function NewConversationModal({ onCreate, onClose }: Props) {
       role="dialog" aria-modal="true" aria-label="New conversation">
       <div className="modal">
         <div className="modal-hd">
-          <div className="modal-ico ico-new">💬</div>
+          <div className="modal-ico"><Icon name="folder" size={18} /></div>
           <div>
-            <h2>New Conversation</h2>
-            <p>Choose a working directory for file access.</p>
+            <h2>New conversation</h2>
+            <p>Choose the folder the agent may read and change.</p>
           </div>
         </div>
         <div className="modal-body">
           <div className="field">
-            <span className="field-label">Working Directory</span>
+            <span className="field-label">Working folder</span>
             <div className="dir-row">
               <input value={path} onChange={e => setPath(e.target.value)} placeholder="~ (home directory)" list="recent-dirs" />
               <datalist id="recent-dirs">{recent.map(d => <option key={d} value={d} />)}</datalist>
-              <button className="pick-btn" onClick={() => PickDirectory().then(d => d && setPath(d))}>Browse</button>
+              <button className="btn" onClick={() => PickDirectory().then(d => d && setPath(d))}>Browse</button>
             </div>
           </div>
         </div>

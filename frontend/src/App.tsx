@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
-import { Markdown } from './Markdown'
 import './style.css'
-import { activate } from './activate'
-import { shortPath } from './format'
 import { uid, useChatStream } from './hooks/useChatStream'
 import { useSpeech } from './hooks/useSpeech'
 import {
   SendMessage, StopAgent, ListConversations, NewConversation, LoadConversation, UpdateConversationPath, ExportConversation, SetConversationModel, TruncateAndResend, ListModels, ListTools, GetConfig, GetStartupError, PickDirectory, ListMCPServers, CheckForUpdate, GetVersion, GetContextUsage, BranchConversation,
 } from '../wailsjs/go/main/App'
-import { ProfilePicker } from './components/ProfilePicker'
+import { ChatHeader, type Panel } from './components/chat/ChatHeader'
+import { Composer } from './components/chat/Composer'
+import { Transcript } from './components/chat/Transcript'
+import { Icon } from './components/Icon'
 import { WorkspaceManager } from './components/WorkspaceManager'
 import { ConversationSidebar } from './components/ConversationSidebar'
 import { NewConversationModal } from './components/NewConversationModal'
@@ -20,21 +20,12 @@ import { SettingsModal } from './components/SettingsModal'
 import type { ConvMeta, SavedConv, ToolInfo, MsgRole, Item, MCPServer, Cfg, UpdateInfo } from './types'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
-// ── Types ─────────────────────────────────────────────────────────────────
-
 // Stored transcript items keep their text under data; the view does not for
 // error and status rows.
 const fromStored = (it: any, id: number): Item =>
   it.type === 'error' || it.type === 'status'
     ? { type: it.type, id, text: it.data.text }
     : { ...it, data: { ...it.data, id, streaming: !!it.data.streaming } }
-
-
-
-
-
-
-// ── App ───────────────────────────────────────────────────────────────────
 
 export default function App() {
   const [convList, setConvList]       = useState<ConvMeta[]>([])
@@ -45,12 +36,13 @@ export default function App() {
   const chat = useChatStream({ notify: (t, b) => notify(t, b), onRunEnd: () => refreshList() })
   const { items, setItems, thinking, runConv, ctxUsage, permReq, answerPermission } = chat
   const speech = useSpeech(text => setInput(prev => (prev ? prev + ' ' : '') + text))
-  const { whisperReady, recording, transcribing, whisperStatus, sttError, setSttError, startRecording, stopRecording } = speech
+  const { whisperReady } = speech
   const [input, setInput]     = useState('')
   // The single run may belong to a conversation other than the one shown.
   const [showUsage, setShowUsage] = useState(false)
-  const [showTimeline, setShowTimeline] = useState(false)
-  const [showChanges, setShowChanges] = useState(false)
+  const [panel, setPanel] = useState<Panel>(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === 'true')
+  const [modelError, setModelError] = useState('')
   const [showWorkspaces, setShowWorkspaces] = useState(false)
   const running = runConv !== null && runConv === activeId
   const busy = runConv !== null
@@ -60,21 +52,6 @@ export default function App() {
   const [showNew, setShowNew]     = useState(false)
   const [showCfg, setShowCfg]     = useState(false)
 
-  // rename state
-
-  // copy feedback
-  const [copiedId, setCopiedId] = useState<number | null>(null)
-
-  // message editing (edit & resend)
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [editValue, setEditValue] = useState('')
-
-  // tag filter + inline tag editor
-
-
-  // speech-to-text
-
-  // context usage
   const [fatalError, setFatalError] = useState('')
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [updateDismissed, setUpdateDismissed] = useState(false)
@@ -98,45 +75,6 @@ export default function App() {
     theme: 'dark',
     sandbox_mode: 'auto', sandbox_network: false, tool_calling: 'auto', backup_retention: 7, context_strategy: 'sliding', max_rounds: 0, max_parallel_tools: 0, tool_timeout_seconds: 0,
   })
-
-  // Virtual scroller refs & state
-  const msgContainerRef = useRef<HTMLDivElement>(null)
-  const [scrollTop, setScrollTop] = useState(0)
-  const isNearBottom = useRef(true)
-
-  const VIRTUAL_OVERSCAN = 6
-
-  const estItemHeight = (it: Item): number => {
-    if (it.type === 'error' || it.type === 'status') return 48
-    if (it.type === 'tool') return 48
-    return Math.max(80, Math.min(500, it.data.text.length * 0.3 + 50))
-  }
-
-  const computeVirtualRange = () => {
-    if (items.length === 0) return { start: 0, end: 0, offsets: [], total: 0 }
-    const heights = items.map(estItemHeight)
-    const offsets: number[] = []
-    let total = 0
-    for (const h of heights) { offsets.push(total); total += h }
-    const ch = msgContainerRef.current?.clientHeight ?? 600
-    const viewTop = scrollTop
-    const viewBot = scrollTop + ch
-    let start = offsets.findIndex((o, i) => o + heights[i] > viewTop - 80 * VIRTUAL_OVERSCAN)
-    if (start < 0) start = Math.max(0, items.length - 1)
-    start = Math.max(0, start - 1)
-    let end = start
-    while (end < items.length && offsets[end] < viewBot + 80 * VIRTUAL_OVERSCAN) end++
-    return { start, end, offsets, total, heights }
-  }
-
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (isNearBottom.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [items])
-
 
   // ── Boot ────────────────────────────────────────────────
 
@@ -165,13 +103,32 @@ export default function App() {
       Notification.requestPermission().catch(() => {})
     }
     GetConfig().then(c => setCfg(c as any)).catch(() => {/* use defaults */})
-    ListModels().then((r: any) => r.models && setModels(r.models)).catch(() => {})
+    checkModels()
     ListTools().then((t: any) => setToolList(t || [])).catch(() => {})
     ListMCPServers().then((s: any) => setMcpServers(s || [])).catch(() => {})
     GetVersion().then(v => setAppVersion(v)).catch(() => {})
     CheckForUpdate().then((info: any) => { if (info?.available) setUpdateInfo(info) }).catch(() => {})
     refreshList()
   }, [])
+
+  // Keyboard shortcuts: Ctrl or Cmd with N, K or comma.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return
+      const action = {
+        n: () => setShowNew(true),
+        ',': () => setShowCfg(true),
+        k: () => { setSidebarCollapsed(false); setTimeout(() => document.querySelector<HTMLInputElement>('.search-input')?.focus()) },
+      }[e.key.toLowerCase()]
+      if (!action) return
+      e.preventDefault()
+      action()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => localStorage.setItem('sidebar-collapsed', String(sidebarCollapsed)), [sidebarCollapsed])
 
   // ── Events ──────────────────────────────────────────────
 
@@ -185,6 +142,11 @@ export default function App() {
   }, [])
 
   // ── Helpers ─────────────────────────────────────────────
+
+  const checkModels = () => ListModels().then((r: any) => {
+    setModels(r.models || [])
+    setModelError(r.error || '')
+  }).catch(() => {})
 
   const refreshList = () => ListConversations().then((l: any) => setConvList(l || []))
 
@@ -241,38 +203,17 @@ export default function App() {
     SendMessage(activeId, text).then(r => chat.runRejected(activeId, r.error))
   }
 
-  const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
-  }
-
-  const startEdit = (id: number, text: string) => {
-    if (busy) return
-    setEditingId(id); setEditValue(text)
-  }
-
   // Resubmit an edited user message: truncate the transcript to that point,
   // replace the message, and re-run the agent from there.
-  const commitEdit = (id: number) => {
-    const text = editValue.trim()
-    if (!text || busy || !activeId) { setEditingId(null); return }
+  const resend = (id: number, text: string) => {
+    if (busy || !activeId) return
     const idx = items.findIndex(it => it.type === 'msg' && it.data.id === id)
-    if (idx < 0) { setEditingId(null); return }
+    if (idx < 0) return
     // userOrdinal = how many user messages precede this one in the transcript.
-    let userOrdinal = 0
-    for (let i = 0; i < idx; i++) {
-      const it = items[i]
-      if (it.type === 'msg' && it.data.role === 'user') userOrdinal++
-    }
+    const userOrdinal = items.slice(0, idx).filter(it => it.type === 'msg' && it.data.role === 'user').length
     setItems(prev => [...prev.slice(0, idx), { type: 'msg', data: { id: uid(), role: 'user', text } }])
-    setEditingId(null); setEditValue('')
     chat.startedRun(activeId)
     TruncateAndResend(activeId, userOrdinal, text).then(r => chat.runRejected(activeId, r.error))
-  }
-
-  const autoResize = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value)
-    const t = e.target; t.style.height = 'auto'
-    t.style.height = Math.min(t.scrollHeight, 160) + 'px'
   }
 
   // Fire an OS notification, but only when enabled, granted, and the window is
@@ -287,15 +228,6 @@ export default function App() {
     } catch {
       // Some webviews reject the constructor — ignore.
     }
-  }
-
-  const copyMessage = (id: number, text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedId(id)
-      setTimeout(() => setCopiedId(null), 2000)
-    }).catch(() => {
-      // Clipboard access denied — silently ignore, copy button stays in default state.
-    })
   }
 
   const branchFromHere = async (itemIdx: number) => {
@@ -326,304 +258,102 @@ export default function App() {
     await SetConversationModel(model)
   }
 
+  const model = convModel || cfg.model
+  const problem = !model ? 'No model is selected, so the agent cannot reply yet.'
+    : modelError ? `The model provider is not responding: ${modelError}` : ''
+  const closeSettings = () => { setShowCfg(false); checkModels() }
+
   return (
     <div className="layout">
-
       {fatalError && (
-        <div className="fatal-banner">
-          <strong>Startup error:</strong> {fatalError}
-          <button onClick={() => setFatalError('')}>✕</button>
+        <div className="banner fatal-banner" role="alert">
+          <Icon name="alert" />
+          <span><strong>Startup error:</strong> {fatalError}</span>
+          <button className="icon-btn" onClick={() => setFatalError('')} aria-label="Dismiss"><Icon name="x" /></button>
+        </div>
+      )}
+      {updateInfo && !updateDismissed && !fatalError && (
+        <div className="banner" role="status">
+          <span><strong>v{updateInfo.latest}</strong> is available; you have {updateInfo.current}.</span>
+          <a href={updateInfo.url} target="_blank" rel="noreferrer">Download</a>
+          <button className="icon-btn" onClick={() => setUpdateDismissed(true)} aria-label="Dismiss"><Icon name="x" /></button>
         </div>
       )}
 
-      {updateInfo && !updateDismissed && (
-        <div className="update-banner">
-          <span>🎉 <strong>v{updateInfo.latest}</strong> is available — you're on {updateInfo.current}</span>
-          <a href={updateInfo.url} target="_blank" rel="noreferrer" className="update-download-btn">Download</a>
-          <button className="update-dismiss" onClick={() => setUpdateDismissed(true)}>✕</button>
-        </div>
-      )}
-
-      <ConversationSidebar convList={convList} activeId={activeId} model={cfg.model} onOpen={openConv} refreshList={refreshList}
+      <ConversationSidebar convList={convList} activeId={activeId} model={cfg.model} online={!modelError}
+        collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(c => !c)}
+        onOpen={openConv} refreshList={refreshList}
         onDeleted={id => {
           if (activeId !== id) return
-          chat.clear(); setActiveId(null); setActiveTitle(''); setActivePath('')
+          chat.clear(); setActiveId(null); setActiveTitle(''); setActivePath(''); setPanel(null)
         }}
         onRenamed={(id, title) => { if (activeId === id) setActiveTitle(title) }}
         onNew={() => setShowNew(true)} onSettings={() => setShowCfg(true)} onUsage={() => setShowUsage(true)}
-        onTimeline={() => setShowTimeline(true)} onChanges={() => setShowChanges(true)} onWorkspaces={() => setShowWorkspaces(true)} />
+        onWorkspaces={() => setShowWorkspaces(true)} />
 
-      {/* ── Main ── */}
-      <div className="main" role="main" aria-label="Chat area">
+      <main className="main" aria-label="Chat area">
         {activeId ? (
           <>
-            <div className="topbar">
-              <div className="topbar-title">{activeTitle || 'Conversation'}</div>
-              {activeId && <ProfilePicker conversationId={activeId} reload={showWorkspaces} />}
-
-              {/* per-conversation model selector */}
-              <select
-                className="topbar-model-sel"
-                value={convModel}
-                onChange={e => changeConvModel(e.target.value)}
-                title="Model for this conversation"
-              >
-                <option value="">↩ Default ({cfg.model})</option>
-                {models.length > 0
-                  ? (() => {
-                      const freeModels = models.filter(m => m.endsWith(':free'))
-                      const paidModels = models.filter(m => !m.endsWith(':free'))
-                      if (freeModels.length > 0 && paidModels.length > 0) {
-                        return (
-                          <>
-                            <optgroup label="── Free ──">
-                              {freeModels.map(m => <option key={m} value={m}>{m}</option>)}
-                            </optgroup>
-                            <optgroup label="── Paid ──">
-                              {paidModels.map(m => <option key={m} value={m}>{m}</option>)}
-                            </optgroup>
-                          </>
-                        )
-                      }
-                      return models.map(m => <option key={m} value={m}>{m}</option>)
-                    })()
-                  : null
-                }
-              </select>
-
-              {/* context usage bar */}
-              {ctxUsage && (() => {
-                const pct = Math.min(100, Math.round(ctxUsage.used / ctxUsage.limit * 100))
-                const warn = pct >= 80
-                const prefix = ctxUsage.estimated ? '~' : ''
-                const totalStr = ctxUsage.total ? ` · ${ctxUsage.total.toLocaleString()} tokens used this conversation` : ''
-                const title = `Context: ${prefix}${ctxUsage.used.toLocaleString()} / ${ctxUsage.limit.toLocaleString()} tokens`
-                  + (ctxUsage.estimated ? ' (estimated)' : ' (actual)') + totalStr
-                  + (ctxUsage.omitted ? `\n${ctxUsage.omitted} older messages are not sent`
-                    + (ctxUsage.summarised ? `; ${ctxUsage.summarised} are summarised` : '') + ' (history is kept)' : '')
-                return (
-                  <div className={`ctx-bar ${warn ? 'warn' : ''}`} title={title}>
-                    <div className="ctx-fill" style={{ width: pct + '%' }} />
-                    <span className="ctx-label">{prefix}{pct}%</span>
-                  </div>
-                )
-              })()}
-
-              {/* export menu */}
-              <div className="export-menu">
-                <button className="topbar-btn" title="Export conversation">⬇</button>
-                <div className="export-dropdown">
-                  <button onClick={() => exportConv('markdown')}>Export as Markdown</button>
-                  <button onClick={() => exportConv('text')}>Export as Plain Text</button>
-                  <button onClick={() => exportConv('json')}>Export as JSON</button>
-                </div>
-              </div>
-
-              <div className="path-chip" {...activate(changePath)} title="Click to change working directory">
-                📁 <span>{shortPath(activePath)}</span>
-              </div>
-            </div>
-
-            <div className="messages" ref={msgContainerRef}
-              onScroll={e => {
-                const el = e.currentTarget
-                setScrollTop(el.scrollTop)
-                isNearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 200
-              }}
-              role="log" aria-live="polite" aria-label="Conversation messages"
-            >
-              {loadingConv && (
-                <div className="conv-loading"><span className="thinking-dots"><span /><span /><span /></span></div>
-              )}
-              {!loadingConv && items.length === 0 && (
-                <div className="empty-state">
-                  <div className="empty-icon">🤖</div>
-                  <h2>Ready to help</h2>
-                  <p>Ask me anything. I can read/write files, run shell commands, and call external APIs — with your permission.</p>
-                </div>
-              )}
-
-              {items.length > 0 && (() => {
-                const { start, end, offsets, total } = computeVirtualRange()
-                const topPad = offsets[start] || 0
-                const lastIdx = Math.min(end, items.length) - 1
-                const bottomPad = lastIdx >= start ? total - (offsets[lastIdx] + estItemHeight(items[lastIdx])) : 0
-                return (
-                  <>
-                    {topPad > 0 && <div style={{ height: topPad }} />}
-                    {items.slice(start, end).map((item, i) => {
-                      const globalIdx = start + i
-                      if (item.type === 'error')
-                        return <div key={item.id} className="error-row" role="alert">⚠ {item.text}</div>
-                      if (item.type === 'status')
-                        return <div key={item.id} className="field-hint" role="status" style={{ textAlign: 'center' }}>— {item.text} —</div>
-                      if (item.type === 'tool') {
-                        const t = item.data
-                        return (
-                          <div key={t.id} className={`tool-evt ${t.kind === 'result' ? 'result' : ''}`}
-                            role="status" aria-label={`Tool ${t.kind}: ${t.tool}`}>
-                            <span className="tool-lbl">{t.kind === 'call' ? `🔧 ${t.tool}` : `↩ ${t.tool}`}</span>
-                            <span className="tool-body">{t.body}</span>
-                          </div>
-                        )
-                      }
-                      const m = item.data
-                      const editing = editingId === m.id
-                      return (
-                        <div key={m.id} className={`msg-row ${m.role}`}
-                          role="article" aria-label={`${m.role} message`}>
-                          <div className={`av ${m.role}`} aria-hidden="true">{m.role === 'user' ? 'U' : '🤖'}</div>
-                          <div className="bubble-wrap">
-                            <div className="bubble">
-                              {editing ? (
-                                <div className="msg-edit">
-                                  <textarea
-                                    autoFocus
-                                    value={editValue}
-                                    onChange={e => setEditValue(e.target.value)}
-                                    onKeyDown={e => {
-                                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitEdit(m.id) }
-                                      if (e.key === 'Escape') { setEditingId(null); setEditValue('') }
-                                    }}
-                                    rows={Math.min(8, editValue.split('\n').length + 1)}
-                                    aria-label="Edit message"
-                                  />
-                                  <div className="msg-edit-actions">
-                                    <button className="btn secondary" onClick={() => { setEditingId(null); setEditValue('') }}
-                                      aria-label="Cancel edit">Cancel</button>
-                                    <button className="btn primary" onClick={() => commitEdit(m.id)} disabled={!editValue.trim()}
-                                      aria-label="Save and resend">Save &amp; resend</button>
-                                  </div>
-                                </div>
-                              ) : m.role === 'assistant' && !m.streaming
-                                ? <Markdown text={m.text} />
-                                : <span>{m.text}{m.streaming && <span className="cursor" role="status" aria-label="Streaming" />}</span>
-                              }
-                            </div>
-                            {!m.streaming && !editing && (
-                              <div className="msg-actions">
-                                {m.role === 'user' && (
-                                  <button
-                                    className="copy-btn"
-                                    onClick={() => startEdit(m.id, m.text)}
-                                    disabled={running}
-                                    title="Edit & resend"
-                                    aria-label="Edit and resend"
-                                  >✎</button>
-                                )}
-                                <button
-                                  className={`copy-btn ${copiedId === m.id ? 'copied' : ''}`}
-                                  onClick={() => copyMessage(m.id, m.text)}
-                                  title="Copy to clipboard"
-                                  aria-label="Copy message text"
-                                >
-                                  {copiedId === m.id ? '✓' : '⧉'}
-                                </button>
-                                <button
-                                  className="copy-btn"
-                                  onClick={() => branchFromHere(globalIdx)}
-                                  disabled={running || !activeId}
-                                  title="Branch from here"
-                                  aria-label="Branch conversation from this message"
-                                >⑂</button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {bottomPad > 0 && <div style={{ height: bottomPad }} />}
-                  </>
-                )
-              })()}
-              {thinking && running && (
-                <div className="msg-row assistant" role="status" aria-label="Agent is thinking">
-                  <div className="av assistant" aria-hidden="true">🤖</div>
-                  <div className="bubble-wrap">
-                    <div className="bubble">
-                      <span className="thinking-dots"><span /><span /><span /></span>
-                    </div>
+            <ChatHeader conversationId={activeId} title={activeTitle} path={activePath} model={convModel}
+              defaultModel={cfg.model} models={models} panel={panel} profilesVersion={showWorkspaces}
+              onModel={changeConvModel} onPath={changePath} onPanel={setPanel} onExport={exportConv} />
+            <div className="workspace">
+              <div className="chat">
+                <Transcript key={activeId} items={items} loading={loadingConv} running={running} thinking={thinking}
+                  canAct={!busy} onSuggest={setInput} onResend={resend} onBranch={branchFromHere} />
+                <div className="composer">
+                  <div className="composer-inner">
+                    {busy && !running && (
+                      <div className="notice" role="status">
+                        <Icon name="clock" />
+                        <span className="notice-text">The agent is working in another conversation.</span>
+                        <button className="btn" onClick={() => openConv(runConv!)}>Show it</button>
+                        <button className="btn danger" onClick={() => StopAgent()}>Stop it</button>
+                      </div>
+                    )}
+                    {problem && (
+                      <div className="notice" role="status">
+                        <Icon name="alert" />
+                        <span className="notice-text">{problem}</span>
+                        <button className="btn" onClick={() => setShowCfg(true)}>Open settings</button>
+                      </div>
+                    )}
+                    <Composer value={input} onChange={setInput} onSend={send} running={running} busy={busy}
+                      usage={ctxUsage} speech={speech} />
                   </div>
                 </div>
-              )}
-              <div ref={bottomRef} />
-            </div>
-
-            <div className="input-bar">
-              <div className="input-shell">
-                <textarea
-                  placeholder="Message the agent… (Enter to send, Shift+Enter for newline)"
-                  value={input} onChange={autoResize} onKeyDown={handleKey}
-                  disabled={(running && !permReq) || transcribing} rows={1}
-                />
               </div>
-
-              {whisperStatus && (
-                <div className="whisper-status">{whisperStatus}</div>
-              )}
-
-              <button
-                className={`mic-btn ${recording ? 'recording' : ''} ${transcribing ? 'transcribing' : ''} ${!whisperReady ? 'unavailable' : ''}`}
-                onMouseDown={!transcribing && !recording && whisperReady ? startRecording : undefined}
-                onMouseUp={recording ? () => stopRecording() : undefined}
-                onMouseLeave={recording ? () => stopRecording() : undefined}
-                onTouchStart={!transcribing && !recording && whisperReady ? (e: React.TouchEvent) => { e.preventDefault(); startRecording() } : undefined}
-                onTouchEnd={recording ? () => stopRecording() : undefined}
-                onClick={!whisperReady ? () => setSttError('Whisper not found. Install with: pip install openai-whisper  (requires ffmpeg too)') : undefined}
-                disabled={running || transcribing}
-                title={
-                  !whisperReady ? 'Whisper not installed — click for instructions'
-                  : recording ? 'Release to transcribe'
-                  : transcribing ? 'Transcribing…'
-                  : 'Hold to record'
-                }
-              >
-                {transcribing ? '⌛' : recording ? '⏺' : '🎤'}
-              </button>
-
-              {running
-                ? <button className="send-btn stop" onClick={() => StopAgent()} title="Stop">⏹</button>
-                : <button className="send-btn" onClick={send} disabled={!input.trim() || transcribing || busy}>➤</button>
-              }
+              {panel === 'activity' && <ToolTimeline conversationId={activeId} onClose={() => setPanel(null)} />}
+              {panel === 'changes' && <FileChanges conversationId={activeId} onClose={() => setPanel(null)} />}
             </div>
-            {busy && !running && (
-              <div className="field-hint" role="status" style={{ textAlign: 'center' }}>
-                The agent is working in another conversation.{' '}
-                <button className="btn secondary" onClick={() => openConv(runConv!)}>Show it</button>{' '}
-                <button className="btn danger" onClick={() => StopAgent()}>Stop it</button>
-              </div>
-            )}
-            {sttError && (
-              <div className="stt-error" {...activate(() => setSttError(''), `Dismiss: ${sttError}`)}>⚠ {sttError}</div>
-            )}
           </>
         ) : (
           <div className="no-conv">
-            <div style={{ fontSize: 48 }}>💬</div>
-            <p>Select a conversation or create a new one.</p>
-            <button className="btn primary" style={{ marginTop: 10 }} onClick={() => setShowNew(true)}>
-              ＋ New conversation
-            </button>
+            <div className="empty-icon"><Icon name="spark" size={22} /></div>
+            <h2>{convList.length ? 'Pick up where you left off' : 'Welcome to your local agent'}</h2>
+            <p>{convList.length
+              ? 'Choose a conversation on the left, or start a new one.'
+              : 'Start a conversation in any folder. Your history stays on this computer.'}</p>
+            <button className="btn primary" onClick={() => setShowNew(true)}><Icon name="plus" />New conversation</button>
+            {modelError && (
+              <div className="notice" role="status">
+                <Icon name="alert" />
+                <span className="notice-text">The model provider is not responding.</span>
+                <button className="btn" onClick={() => setShowCfg(true)}>Open settings</button>
+              </div>
+            )}
           </div>
         )}
-      </div>
+      </main>
 
       {showNew && <NewConversationModal onCreate={createConv} onClose={() => setShowNew(false)} />}
-
-      {showTimeline && activeId && <ToolTimeline conversationId={activeId} onClose={() => setShowTimeline(false)} />}
-
-      {showChanges && activeId && <FileChanges conversationId={activeId} onClose={() => setShowChanges(false)} />}
-
       {showWorkspaces && <WorkspaceManager onClose={() => setShowWorkspaces(false)} />}
-
       {showUsage && <UsageDashboard conversations={convList} onClose={() => setShowUsage(false)} />}
-
       {permReq && <PermissionDialog request={permReq} onAnswer={answerPermission} />}
-
       {showCfg && (
         <SettingsModal cfg={cfg} setCfg={setCfg} models={models} setModels={setModels} toolList={toolList}
           mcpServers={mcpServers} setMcpServers={setMcpServers} whisperReady={whisperReady}
-          appVersion={appVersion} onImported={refreshList} onClose={() => setShowCfg(false)} />
+          appVersion={appVersion} onImported={refreshList} onClose={closeSettings} />
       )}
     </div>
   )
