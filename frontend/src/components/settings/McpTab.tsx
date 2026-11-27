@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   GetMCPStatus, RestartMCPServer, ProbeMCPServer,
 } from '../../../wailsjs/go/main/App'
+import { Icon } from '../Icon'
 import type { Dispatch, SetStateAction } from 'react'
 import type { MCPServer } from '../../types'
 
@@ -88,20 +89,20 @@ export function McpTab({ mcpServers, setMcpServers }: Props) {
         </div>
 
         <div className="mcp-prereq-banner">
-          <span className="mcp-prereq-icon">⚠️</span>
+          <Icon name="alert" />
           <div>
             <strong>Before using MCP servers</strong> — each server is a separate program that must be installed on your machine first.<br />
-            Use <strong>Test Connection</strong> on each card to verify it works before starting a conversation.
+            Use <strong>Test connection</strong> on each card to verify it works before starting a conversation.
           </div>
         </div>
 
         <div className="mcp-presets">
-          <div className="mcp-presets-label">Quick Add</div>
+          <div className="mcp-presets-label">Quick add</div>
           <div className="mcp-presets-row">
             {[
-              { key: 'postgres', icon: '🐘', label: 'PostgreSQL', desc: 'Query & modify Postgres databases' },
-              { key: 'mongodb',  icon: '🍃', label: 'MongoDB',    desc: 'Read & write MongoDB collections' },
-              { key: 'gdrive',   icon: '📂', label: 'Google Drive', desc: 'List, read & upload Drive files' },
+              { key: 'postgres', icon: 'database' as const, label: 'PostgreSQL', desc: 'Query & modify Postgres databases' },
+              { key: 'mongodb',  icon: 'database' as const, label: 'MongoDB',    desc: 'Read & write MongoDB collections' },
+              { key: 'gdrive',   icon: 'folder' as const, label: 'Google Drive', desc: 'List, read & upload Drive files' },
             ].map(p => {
               const already = mcpServers.some(s => s.name === p.key)
               return (
@@ -112,7 +113,7 @@ export function McpTab({ mcpServers, setMcpServers }: Props) {
                     const preset = MCP_PRESETS.find(x => x.name === p.key)
                     if (preset) setMcpServers(s => [...s, { ...preset }])
                   }}>
-                  <span className="mcp-preset-icon">{p.icon}</span>
+                  <Icon name={p.icon} size={18} />
                   <span className="mcp-preset-name">{p.label}</span>
                   <span className="mcp-preset-desc">{already ? '✓ Added' : p.desc}</span>
                 </button>
@@ -129,44 +130,44 @@ export function McpTab({ mcpServers, setMcpServers }: Props) {
                   onChange={e => setMcpServers(s => s.map((x, j) => j === i ? { ...x, enabled: e.target.checked } : x))} />
                 <span>Enabled</span>
               </label>
-              <button className="btn-icon danger" title="Remove server"
-                onClick={() => setMcpServers(s => s.filter((_, j) => j !== i))}>✕</button>
+              <button className="icon-btn danger" title="Remove server"
+                aria-label="Remove server" onClick={() => setMcpServers(s => s.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button>
             </div>
 
             {srv.name === 'postgres' && (
               <div className="mcp-setup-hint">
-                <div className="mcp-setup-title">🐘 PostgreSQL — setup required</div>
+                <div className="mcp-setup-title">PostgreSQL — setup required</div>
                 <ol className="mcp-setup-steps">
                   <li>Install Node.js if not already: <a href="https://nodejs.org" target="_blank" rel="noreferrer">nodejs.org</a></li>
                   <li>Install the MCP server once:<br /><code>npm install -g @modelcontextprotocol/server-postgres</code></li>
                   <li>Change <strong>Command</strong> to <code>mcp-server-postgres</code> and remove the <code>-y</code> / package name from Args</li>
                   <li>Replace the connection string in Args with your actual Postgres URL</li>
-                  <li>Click <strong>Test Connection</strong> to verify before saving</li>
+                  <li>Click <strong>Test connection</strong> to verify before saving</li>
                 </ol>
               </div>
             )}
             {srv.name === 'mongodb' && (
               <div className="mcp-setup-hint">
-                <div className="mcp-setup-title">🍃 MongoDB — setup required</div>
+                <div className="mcp-setup-title">MongoDB — setup required</div>
                 <ol className="mcp-setup-steps">
                   <li>Install Node.js if not already: <a href="https://nodejs.org" target="_blank" rel="noreferrer">nodejs.org</a></li>
                   <li>Install the MCP server once:<br /><code>npm install -g mongodb-mcp-server</code></li>
                   <li>Change <strong>Command</strong> to <code>mongodb-mcp-server</code> and clear the Args (no npx flags needed)</li>
                   <li>Add your connection string to Args: <code>--connectionString mongodb://localhost:27017/mydb</code></li>
-                  <li>Click <strong>Test Connection</strong> to verify before saving</li>
+                  <li>Click <strong>Test connection</strong> to verify before saving</li>
                 </ol>
               </div>
             )}
             {srv.name === 'gdrive' && (
               <div className="mcp-setup-hint">
-                <div className="mcp-setup-title">📂 Google Drive — setup required</div>
+                <div className="mcp-setup-title">Google Drive — setup required</div>
                 <ol className="mcp-setup-steps">
                   <li>Install Node.js if not already: <a href="https://nodejs.org" target="_blank" rel="noreferrer">nodejs.org</a></li>
                   <li>Install the MCP server once:<br /><code>npm install -g @modelcontextprotocol/server-gdrive</code></li>
                   <li>Create OAuth2 credentials in <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer">Google Cloud Console</a> → APIs &amp; Services → Credentials</li>
                   <li>Set <code>GDRIVE_CREDENTIALS_FILE</code> in Env vars to the downloaded JSON path</li>
                   <li>Set <code>GDRIVE_TOKEN_FILE</code> to a writable path (e.g. <code>/home/you/.gdrive-token.json</code>)</li>
-                  <li>Click <strong>Test Connection</strong> to verify before saving</li>
+                  <li>Click <strong>Test connection</strong> to verify before saving</li>
                 </ol>
               </div>
             )}
@@ -235,7 +236,7 @@ export function McpTab({ mcpServers, setMcpServers }: Props) {
                     setMcpProbing(p => ({ ...p, [i]: false }))
                   }
                 }}>
-                {mcpProbing[i] ? 'Testing…' : 'Test Connection'}
+                {mcpProbing[i] ? 'Testing…' : 'Test connection'}
               </button>
               {mcpProbeResult[i] && (
                 <span style={{ fontSize: 12, color: mcpProbeResult[i].startsWith('✓') ? 'var(--green)' : 'var(--red)' }}>
@@ -248,7 +249,7 @@ export function McpTab({ mcpServers, setMcpServers }: Props) {
 
         <button className="btn secondary" style={{ marginTop: 12 }}
           onClick={() => setMcpServers(s => [...s, emptyMCP()])}>
-          + Add MCP Server
+          + Add MCP server
         </button>
       </div>
     </>

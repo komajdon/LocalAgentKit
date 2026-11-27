@@ -425,3 +425,17 @@ select.perm-sel { width: auto; min-height: 30px; padding: 3px 8px; font-size: 12
 .mcp-setup-steps { padding-left: 18px; }
 .mcp-setup-hint a, .mcp-prereq-banner a { color: var(--accent); }
 .model-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
+.settings-page { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.settings-page > .modal-body { overflow: visible; padding: 16px 24px; }
+.settings-page > [aria-label="MCP server status"] { padding: 14px 24px 0 !important; display: flex; flex-direction: column; gap: 6px; }
+
+/* Near the minimum window size, give the conversation title room. */
+@media (max-width: 900px) {
+  .sidebar:not(.collapsed) { width: 216px; }
+  .sidebar kbd { display: none; }
+  .topbar { gap: 4px; padding-left: 12px; }
+  .topbar select { max-width: 104px; }
+  .topbar-sep { display: none; }
+  .messages, .composer { padding-left: 14px; padding-right: 14px; }
+  .input-hint { visibility: hidden; }
+}

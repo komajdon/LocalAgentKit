@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   ExportBackup, ImportBackup, GetKeyLocation, SetKeyLocation, RotateEncryptionKey, ImportConversation,
 } from '../../../wailsjs/go/main/App'
+import { Icon } from '../Icon'
 import type { Dispatch, SetStateAction } from 'react'
 import type { Cfg } from '../../types'
 
@@ -119,7 +120,7 @@ export function DataSettings({ cfg, setCfg, onImported }: Props) {
           >Import conversations…</button>
           <button className="btn secondary" onClick={() => setImportMsg('')}
             aria-label="Dismiss import message"
-            style={{ display: importMsg ? 'inline-block' : 'none' }}>✕</button>
+            style={{ display: importMsg ? 'inline-flex' : 'none' }}><Icon name="x" size={14} /></button>
         </div>
         {importMsg && (
           <div className="field-hint" style={{ color: importMsg.startsWith('✓') ? 'var(--green)' : 'var(--text2)' }}>
