@@ -1,3 +1,4 @@
+import { Icon } from './Icon'
 import { useEffect, useMemo, useState } from 'react'
 import { GetToolTimeline } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
@@ -49,10 +50,10 @@ export function ToolTimeline({ conversationId, onClose }: { conversationId: stri
   const shown = (records ?? []).filter(r => (!status || r.status === status) && (!tool || r.tool === tool)).slice().reverse()
 
   return (
-    <div className="overlay" role="dialog" aria-modal="true" aria-label="Tool timeline">
-      <div className="modal wide">
+    <aside className="drawer" role="dialog" aria-label="Tool timeline">
         <div className="modal-hd">
-          <div><h2>Tool timeline</h2><p>Newest first. Sensitive values are redacted; long text is shortened.</p></div>
+          <div><h2>Tool timeline</h2><p>Newest first. Sensitive values are redacted.</p></div>
+          <button className="icon-btn" onClick={onClose} aria-label="Close panel" title="Close (Esc)"><Icon name="x" /></button>
         </div>
         <div className="modal-body">
           <div className="usage-filters">
@@ -87,8 +88,6 @@ export function ToolTimeline({ conversationId, onClose }: { conversationId: stri
             </details>
           ))}
         </div>
-        <div className="modal-ft"><button className="btn secondary" onClick={onClose}>Close</button></div>
-      </div>
-    </div>
+    </aside>
   )
 }
